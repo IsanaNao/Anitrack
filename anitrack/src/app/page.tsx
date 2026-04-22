@@ -1,6 +1,21 @@
+"use client";
+
 import Image from "next/image";
+import { useEffect } from "react";
+
+import { getAnimeEntries } from "@/lib/api";
 
 export default function Home() {
+  useEffect(() => {
+    (async () => {
+      const data = await getAnimeEntries({ page: 1, pageSize: 5 });
+      // 临时联调：确认能看到 userId 与 animeMeta
+      console.log("GET /api/anime →", data);
+    })().catch((err) => {
+      console.error("GET /api/anime failed", err);
+    });
+  }, []);
+
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">

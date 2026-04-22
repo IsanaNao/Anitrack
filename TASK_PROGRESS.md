@@ -7,9 +7,9 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：**阶段 3 进行中**（Jikan 影子库缓存 + Ownership 拆分；前端尚未开始）
-- **正在做**：数据库重构：实现 `AnimeMeta`（公有）/ `AnimeEntry`（私有）双表与关联返回
-- **下一步**：前端基础布局（Tailwind 响应式骨架）→ Watchlist / Heatmap 绿墙 / Seasonal UI
+- **当前阶段**：**阶段 3 启动**（Jikan 搜索/读取集成 + 前端对接 NestJS API）
+- **正在做**：建立前后端通信基准（前端统一 API 封装 → 直连 `http://localhost:3001/api`）
+- **下一步**：Jikan 搜索接口（后端/代理）→ 前端搜索 UI 对接 → Watchlist / Heatmap / Seasonal
 - **阻塞/风险**：阶段 4 引入 Auth 前，`userId` 暂用 `TEMP_USER_ID`（技术债，见下）
 - **最后更新时间**：2026-04-22
 
@@ -18,8 +18,8 @@
 ## 1. 总里程碑（按课程要求对齐）
 
 - [x] **阶段 1（后端基座）**：Next.js App Router API + MongoDB + `/api/anime` CRUD + **OpenAPI / Swagger UI** + **Contract Testing**（`anitrack-tester/contract-validator`）
-- [x] **阶段 2（逻辑与测试）**：`/api/stats/heatmap`（Aggregation Pipeline + 日期 **Normalization**）+ Vitest 单元/集成 + 播种脚本与数据验证
-- [ ] **阶段 3（前端渲染）**：Tailwind 响应式主界面 + heatmap 渲染 + 移动端横向滚动
+- [x] **阶段 2（后端重构与测试）**：**100% Completed**（NestJS 平移 + 双表 Ownership 拆分 + heatmap 测试/契约对齐）
+- [ ] **阶段 3（Jikan 搜索集成 & 前端对接）**：建立前端 API 基座 → 接入 Jikan 搜索/读取 → 前端联调
 
 ---
 

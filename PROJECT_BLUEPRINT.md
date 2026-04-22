@@ -13,6 +13,9 @@
   - **前后端解耦**：前端只渲染与交互，后端提供稳定数据契约
   - **业务逻辑封装**：统计计算、状态机校验等逻辑严格在后端
   - **响应式 UI**：移动端与桌面端体验一致且合理
+- **运行时端口（Truth）**：
+  - **Backend**：NestJS（`http://localhost:3001`，API Base：`/api`，Swagger UI：`/api-docs`）
+  - **Frontend**：Next.js（`http://localhost:3000`）
 
 ---
 
@@ -361,6 +364,26 @@
 
 #### 关系
 - `AnimeEntry.malId` → `AnimeMeta.malId`（以 `malId` 进行关联；列表/详情响应中嵌套 `animeMeta`）
+
+### 4.4 双表关联返回逻辑（`AnimeMeta` ↔ `AnimeEntry`）
+
+> 目标：让 `AnimeEntry` 保持“用户私有进度”，让 `AnimeMeta` 承担“公有元数据缓存”，并且前端拿到的数据天然适合渲染（`animeMeta` 已嵌套在返回体中）。
+
+- **数据职责拆分**：
+  - **`AnimeMeta`**：以 `malId` 为全局唯一键，保存标题/封面/集数/评分等“客观元数据”（可由 Jikan 拉取并缓存）。
+  - **`AnimeEntry`**：以 `userId + malId` 唯一，保存状态/评分/笔记/完成日期等“用户私有进度”。
+- **关联键**：`AnimeEntry.malId` ↔ `AnimeMeta.malId`（用 `malId` 进行 join）
+- **读路径（列表/详情）**（文字流程图）：
+  - `GET /api/anime` / `GET /api/anime/:id`
+  - 查 `AnimeEntry`（按 `userId` 过滤）得到 entries
+  - 取出 entries 的 `malId[]`
+  - 查 `AnimeMeta`（`malId in [...]`）
+  - 组装响应：对每个 entry，注入 `animeMeta`（若未命中，可为 `null` 或触发后端补写；以实现为准）
+- **写路径（创建）**（Cache-Aside 思路）：
+  - `POST /api/anime`（客户端仅提交 `malId` + 私有字段）
+  - 先查/写 `AnimeMeta(malId)`（未命中则从外部源拉取并写入缓存）
+  - 再写 `AnimeEntry(userId, malId, ...)`
+  - 返回 `AnimeEntry`，并在返回体中嵌套 `animeMeta`
 
 ---
 

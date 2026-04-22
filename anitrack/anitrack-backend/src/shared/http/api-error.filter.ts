@@ -13,6 +13,7 @@ export type ApiErrorCode =
   | 'VALIDATION_ERROR'
   | 'NOT_FOUND'
   | 'INVALID_STATUS_TRANSITION'
+  | 'UPSTREAM_ERROR'
   | 'INTERNAL_ERROR';
 
 export type ApiErrorDetail = { path: string; reason: string };

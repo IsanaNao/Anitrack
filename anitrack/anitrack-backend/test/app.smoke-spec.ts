@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { AnimeMetaService } from '../src/modules/anime-meta/anime-meta.service';
 import { ApiErrorExceptionFilter } from '../src/shared/http/api-error.filter';
 
 function expectErrorEnvelope(body: any) {
@@ -30,7 +31,20 @@ describe('NestJS backend smoke (e2e)', () => {
 
     const modRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(AnimeMetaService)
+      .useValue({
+        findByMalIds: async (malIds: number[]) =>
+          malIds.map((malId) => ({ malId, title: `mock-title-${malId}`, imageUrl: 'https://example.com/x.jpg' })),
+        getOrFetchByMalId: async (malId: number) => ({
+          malId,
+          title: `mock-title-${malId}`,
+          imageUrl: 'https://example.com/x.jpg',
+          episodes: 1,
+          score: 8.8,
+        }),
+      })
+      .compile();
 
     app = modRef.createNestApplication();
 
@@ -71,7 +85,7 @@ describe('NestJS backend smoke (e2e)', () => {
     // Ensure DB connection is established before aggregation (avoids first-call 500 in some environments).
     await request(app.getHttpServer())
       .post('/api/anime')
-      .send({ malId: 999000, title: 'Heatmap Warmup', status: 'COMPLETED' })
+      .send({ malId: 999000, status: 'COMPLETED' })
       .expect(201);
 
     const res = await request(app.getHttpServer()).get('/api/stats/heatmap').expect(200);
@@ -97,7 +111,7 @@ describe('NestJS backend smoke (e2e)', () => {
     // Create DROPPED
     const created = await request(app.getHttpServer())
       .post('/api/anime')
-      .send({ malId: 999001, title: 'Smoke Test Anime', status: 'DROPPED' })
+      .send({ malId: 999001, status: 'DROPPED' })
       .expect(201);
 
     const id = created.body?.id;
@@ -116,7 +130,7 @@ describe('NestJS backend smoke (e2e)', () => {
   it('data flow: create -> get -> patch -> delete', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/anime')
-      .send({ malId: 999002, title: 'Flow Test Anime', status: 'PLANNED' })
+      .send({ malId: 999002, status: 'PLANNED' })
       .expect(201);
 
     const id = created.body?.id;

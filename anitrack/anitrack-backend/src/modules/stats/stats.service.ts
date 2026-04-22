@@ -8,6 +8,7 @@ import {
   compareYMD,
   getTodayInTimeZone,
 } from '../../common/utils/heatmap-calc';
+import { TEMP_USER_ID } from '../../shared/auth/temp-user';
 import { AnimeEntry, AnimeEntryDocument } from '../anime/schemas/anime-entry.schema';
 import { HeatmapQueryDto } from './dto/heatmap-query.dto';
 
@@ -38,6 +39,7 @@ export class StatsService {
     const rows = await this.model.aggregate<{ _id: string; count: number }>([
       {
         $match: {
+          userId: TEMP_USER_ID,
           status: 'COMPLETED',
           completedDates: { $exists: true, $type: 'array', $ne: [] },
         },

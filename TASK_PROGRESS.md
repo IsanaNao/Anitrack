@@ -7,11 +7,11 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：**阶段 1、阶段 2 已完结**；**阶段 3 未开始**（前端 + Jikan 集成）
-- **正在做**：无
-- **下一步**：**Jikan API 后端代理（或缓存代理）** + **前端基础布局**（Tailwind 响应式骨架）；随后 Watchlist / Heatmap 绿墙 / Seasonal UI
-- **阻塞/风险**：无（Atlas 与本地 `.env.local` 已验证可用）
-- **最后更新时间**：2026-04-20
+- **当前阶段**：**阶段 3 进行中**（Jikan 影子库缓存 + Ownership 拆分；前端尚未开始）
+- **正在做**：数据库重构：实现 `AnimeMeta`（公有）/ `AnimeEntry`（私有）双表与关联返回
+- **下一步**：前端基础布局（Tailwind 响应式骨架）→ Watchlist / Heatmap 绿墙 / Seasonal UI
+- **阻塞/风险**：阶段 4 引入 Auth 前，`userId` 暂用 `TEMP_USER_ID`（技术债，见下）
+- **最后更新时间**：2026-04-22
 
 ---
 
@@ -82,6 +82,13 @@
 
 ## 4. 阶段 3：前端渲染（TODO）
 
+### 4.0 数据库重构（Ownership / 双表拆分）
+- [x] 新增 `AnimeMeta`（公有元数据缓存）：以 `malId` 作为全局唯一键，缓存 Jikan 元数据（cache-aside）
+- [x] 重构 `AnimeEntry`（用户私有进度）：仅保留 `userId + malId + status/completedDates` 等个性化字段
+- [x] `AnimeEntry` 复合唯一索引：`(userId, malId)`（允许不同用户拥有各自的同名条目）
+- [x] 列表/详情返回结构：`AnimeEntry` 中嵌套 `animeMeta`（前端展示更干净）
+- [x] `Stats/heatmap` 聚合：首个 `$match` 带 `userId=TEMP_USER_ID`
+
 ### 4.1 UI 基础
 - [ ] Tailwind 配置
 - [ ] 主页面布局（移动端纵向、桌面端左右/上下分区）
@@ -113,7 +120,7 @@
 ## 6. 问题清单（Open Questions）
 
 - [ ] 是否需要登录/鉴权？（课程若不要求，可先单用户模式；多用户见 Blueprint **§3.9**）
-- [ ] Jikan：阶段 3 是否同时落地 **AnimeMeta Cache-Aside（Blueprint §3.8）** 与最小代理？（推荐「代理 + 缓存」分步交付）
+- [x] Jikan：已落地 **AnimeMeta Cache-Aside（Blueprint §3.8）**，并在创建条目时按 `malId` 自动抓取/缓存元数据
 - [x] Heatmap `from/to` 默认范围：**已实现**为「`to`= 指定 `tz` 的日历今天，`from` = `to` 往前 365 日」（闭区间）
 
 ---
@@ -125,6 +132,16 @@
 - 2026-04-20：新增 `public/swagger.json`（anime CRUD + heatmap 契约）与 `/api-docs`（`swagger-ui-dist`），本地可 Try it out
 - **2026-04-20（阶段 2 收口）**：攻克热力图 **MongoDB `Date` / `string` 混合类型** 在 **Aggregation Pipeline** 中与查询边界比较失效的问题（通过 **`$unwind` 后 Normalization** + `$dateToString` 等）；**Vitest** 单测 + 集成测试落地；`heatmap-seeder.js` 与 **Contract Testing**（`anitrack-tester/contract-validator`）在严格模式下与 OpenAPI 契约 **100% 对齐**（运行时冒烟全绿）
 - **2026-04-22（架构平移）**：后端从 Next.js Route Handlers 平移至 **NestJS**（端口 `3001`，全局前缀 `/api`，Swagger UI `/api-docs`）；`/api/anime` CRUD + `/api/stats/heatmap` 聚合逻辑已迁移并保持字段名不变；契约测试默认指向 `3001`（NestJS 作为主 API 供应方）
+- **2026-04-22（Ownership 拆分）**：引入双表：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）；`POST /api/anime` 仅需 `malId`；响应中嵌套 `animeMeta`；`Stats/heatmap` 加入 `TEMP_USER_ID` 过滤；契约测试与 e2e 全绿
+
+---
+
+## 9. 技术债务（Tech Debt）
+
+- **TEMP_USER_ID**：阶段 3 暂用静态占位符（`default_user`），阶段 4 接入 Auth 后需要替换为从 Token 解析的真实用户 id
+- **索引迁移风险**：旧集合上可能残留 `{ malId: 1 } unique` 索引会阻止新结构插入  
+  - 已在服务启动时调用 `this.animeEntryModel.syncIndexes()`（无 DB 时跳过）  
+  - 若 Atlas 上仍异常，建议在网页端 **Drop `animeentries` collection** 后重启，让新索引干净重建
 
 ---
 

@@ -15,14 +15,11 @@ export type AnimeEntryDocument = HydratedDocument<AnimeEntry>;
   },
 })
 export class AnimeEntry {
+  @Prop({ type: String, required: true, trim: true, index: true })
+  userId!: string;
+
   @Prop({ type: Number, required: true })
   malId!: number;
-
-  @Prop({ type: String, required: true, trim: true })
-  title!: string;
-
-  @Prop({ type: String, required: false })
-  imageUrl?: string;
 
   @Prop({
     type: String,
@@ -51,7 +48,7 @@ export class AnimeEntry {
 
 export const AnimeEntrySchema = SchemaFactory.createForClass(AnimeEntry);
 
-AnimeEntrySchema.index({ malId: 1 }, { unique: true });
-AnimeEntrySchema.index({ status: 1, updatedAt: -1 });
+AnimeEntrySchema.index({ userId: 1, malId: 1 }, { unique: true });
+AnimeEntrySchema.index({ userId: 1, status: 1, updatedAt: -1 });
 AnimeEntrySchema.index({ completedDates: 1 });
 

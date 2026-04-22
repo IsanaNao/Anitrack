@@ -32,7 +32,9 @@ import { StatsModule } from './modules/stats/stats.module';
         return {
           uri: uri || 'mongodb://127.0.0.1:27017/anitrack',
           bufferCommands: false,
-          lazyConnection: true,
+          // If a real URI is provided (tests / production), connect eagerly.
+          // If not, keep Swagger bootable without a running Mongo instance.
+          lazyConnection: !uri,
         };
       },
     }),

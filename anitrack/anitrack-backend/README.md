@@ -1,3 +1,5 @@
+> ⚠️ 这不是仓库主 README。请优先阅读仓库根目录的 `README.md`（整体启动方式/文档入口以根 README 为准）。
+
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>

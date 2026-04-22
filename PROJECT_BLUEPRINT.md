@@ -28,7 +28,7 @@
   - `DROPPED`（抛弃）
   - `COMPLETED`（已看过）
 - **核心能力**：
-  - 创建条目（可从 Jikan 数据导入基础字段）
+  - 创建条目（前端仅提交 `malId`；后端通过影子库缓存拉取元数据）
   - 更新条目（尤其是状态变更、完成日期记录）
   - 删除条目
   - 列表查询（按状态筛选、分页/排序）
@@ -128,15 +128,21 @@
   "items": [
     {
       "id": "65f0c1... (string)",
+      "userId": "default_user",
       "malId": 5114,
-      "title": "Fullmetal Alchemist: Brotherhood",
-      "imageUrl": "https://...",
       "status": "COMPLETED",
       "rating": 9,
       "notes": "optional",
       "startedAt": "2026-04-01",
       "completedAt": "2026-04-12",
       "completedDates": ["2026-04-12"],
+      "animeMeta": {
+        "malId": 5114,
+        "title": "Fullmetal Alchemist: Brotherhood",
+        "imageUrl": "https://...",
+        "episodes": 64,
+        "score": 9.11
+      },
       "createdAt": "2026-04-12T10:00:00.000Z",
       "updatedAt": "2026-04-12T10:00:00.000Z"
     }
@@ -157,8 +163,6 @@
 ```json
 {
   "malId": 5114,
-  "title": "Fullmetal Alchemist: Brotherhood",
-  "imageUrl": "https://...",
   "status": "PLANNED",
   "rating": 9,
   "notes": "optional",
@@ -169,7 +173,7 @@
 ```
 
 #### 字段规则（后端强制）
-- `malId`：number，建议唯一（同一用户不重复）
+- `malId`：number，同一用户下唯一（数据库层面通过 `(userId, malId)` 复合唯一索引保证）
 - `status`：必须是枚举之一
 - `rating`：可选，建议 1-10（或 0-10），由后端校验
 - `completedAt` / `completedDates`：
@@ -271,7 +275,7 @@
   3. **失效策略（可选）**：TTL 索引、`updatedAt` 阈值、或手动 purge；初期可采用「长期缓存 + 手动刷新」降低复杂度。
 - **工程收益**：显著降低对外部 API 的耦合与 **429** 风险；本地索引（如 `malId` unique）支撑「类 **10 亿级**」夸张表述下的 **常数级主键查找**（相对每次 HTTP 往返的数量级差异）。
 
-> **实现状态**：本节为 **§3 架构战略升级**；路由与 Schema 可在阶段 3 并行落地，与 `GET /api/anime` 导入流衔接。
+> **实现状态**：已在 NestJS 后端落地为双表结构：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）。创建条目时采用 **Cache-Aside**：先查/写 `AnimeMeta`，再写 `AnimeEntry`，并在返回体中嵌套 `animeMeta`。
 
 ---
 
@@ -319,14 +323,12 @@
 - `passwordHash`（若做 auth）
 - `createdAt` / `updatedAt`
 
-### 4.2 `AnimeEntry`（watchlist 主表）
+### 4.2 `AnimeEntry`（用户私有 watchlist 主表）
 
 建议字段（以 Mongoose/TypeScript 的思路表达）：
 - `_id`：ObjectId
-- `userId`：ObjectId（若无登录，可先用单用户默认值或省略）
+- `userId`：string（阶段 3 占位符 `TEMP_USER_ID`；阶段 4 迁移为从 Token 解析出的真实用户 id）
 - `malId`：number（来自 Jikan / MyAnimeList）
-- `title`：string
-- `imageUrl`：string（可选）
 - `status`：enum
 - `rating`：number（可选）
 - `notes`：string（可选）
@@ -334,6 +336,8 @@
 - `completedAt`：string(`YYYY-MM-DD`)（可选）
 - `completedDates`：string[](`YYYY-MM-DD`)（**为 heatmap 关键**）
 - `createdAt` / `updatedAt`
+
+> **Ownership 约束**：`AnimeEntry` 中禁止出现 `title/imageUrl/score/episodes` 等番剧客观信息；这些字段必须属于 `AnimeMeta`。
 
 #### 为什么需要 `completedDates`
 - 最简：每次完成一部番就记 1 个日期，用于贡献计数
@@ -344,6 +348,19 @@
 - `(userId, status)`
 - `(userId, updatedAt)`（列表排序）
 - `completedDates`（多键索引）用于范围查询/聚合（视实现而定）
+
+### 4.3 `AnimeMeta`（番剧公有元数据缓存 / 影子库）
+
+- `_id`：ObjectId
+- `malId`：number（全局唯一）
+- `title`：string
+- `imageUrl`：string（可选）
+- `episodes`：number（可选）
+- `score`：number（可选）
+- `createdAt` / `updatedAt`
+
+#### 关系
+- `AnimeEntry.malId` → `AnimeMeta.malId`（以 `malId` 进行关联；列表/详情响应中嵌套 `animeMeta`）
 
 ---
 

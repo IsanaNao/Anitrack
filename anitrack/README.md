@@ -1,3 +1,5 @@
+> ⚠️ 这不是仓库主 README。请优先阅读仓库根目录的 `README.md`（启动前后端、契约测试等以根 README 为准）。
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

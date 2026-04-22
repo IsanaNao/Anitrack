@@ -6,12 +6,10 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  IsUrl,
   Matches,
   Max,
   MaxLength,
   Min,
-  MinLength,
 } from 'class-validator';
 import { AnimeStatusValues } from '../anime.constants';
 
@@ -19,15 +17,6 @@ export class AnimeEntryCreateDto {
   @IsInt()
   @Min(0)
   malId!: number;
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(5000)
-  title!: string;
-
-  @IsOptional()
-  @IsUrl()
-  imageUrl?: string;
 
   @IsOptional()
   @IsIn(AnimeStatusValues)
@@ -72,16 +61,6 @@ export class AnimeEntryPatchDto {
   @IsInt()
   @Min(0)
   malId?: number;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(5000)
-  title?: string;
-
-  @IsOptional()
-  @IsUrl()
-  imageUrl?: string;
 
   @IsOptional()
   @IsIn(AnimeStatusValues)
@@ -134,7 +113,6 @@ export class AnimeListQueryDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(100)
   pageSize?: number;
 
   @IsOptional()

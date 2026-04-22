@@ -185,13 +185,13 @@ async function checkPageSizeClamp(spec, origin) {
  */
 async function checkListAndItemShape(spec, origin) {
   const errors = [];
-  const malId = Math.floor(Math.random() * 900_000_000) + 100_000_000;
+  // Use a stable MAL id that exists in Jikan, because backend now fetches AnimeMeta on create.
+  const malId = 5114;
 
   const createUrl = `${origin}/api/anime`;
   const created = await request("POST", createUrl, {
     jsonBody: {
       malId,
-      title: `contract-validator ${malId}`,
       status: "PLANNED",
     },
   });

@@ -1,0 +1,453 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Anitrack API",
+    "version": "0.1.0",
+    "description": "Watchlist CRUD and statistics for Anitrack (Web Technologies I). JSON request/response bodies use `application/json`. Error envelope: `{ \"error\": { \"code\", \"message\", \"details\" } }`."
+  },
+  "tags": [
+    { "name": "Anime", "description": "Watchlist entries (MongoDB-backed)" },
+    { "name": "Statistics", "description": "Aggregated analytics (heatmap contract; implementation in phase 2)" }
+  ],
+  "paths": {
+    "/api/anime": {
+      "get": {
+        "tags": ["Anime"],
+        "summary": "List anime entries",
+        "description": "Paginated list with optional `status` filter. Sorting is applied on `updatedAt` only; `sort` uses `field:direction` (direction `asc` or `desc`, default `updatedAt:desc`).",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/AnimeStatus" },
+            "description": "Filter by watchlist status."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "default": 1 },
+            "description": "1-based page index."
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+            "description": "Page size (capped at 100)."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "default": "updatedAt:desc", "example": "updatedAt:desc" },
+            "description": "Sort key and order, e.g. `updatedAt:desc` or `updatedAt:asc`. Current implementation always sorts by `updatedAt`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated watchlist items.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnimeListPage" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query (e.g. unknown `status`).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorBody" },
+                "example": {
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Invalid query",
+                    "details": [{ "path": "status", "reason": "Invalid enum value" }]
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Anime"],
+        "summary": "Create anime entry",
+        "description": "Creates a watchlist row. `malId` must be unique (duplicate → 409). `completedAt` / `completedDates` are only allowed when `status` is `COMPLETED`; otherwise the API returns 400. When `status` is `COMPLETED`, `completedAt` defaults to today (UTC date `YYYY-MM-DD`) and is merged into `completedDates`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AnimeEntryCreate" },
+              "examples": {
+                "planned": {
+                  "summary": "New entry (planned)",
+                  "value": {
+                    "malId": 5114,
+                    "title": "Fullmetal Alchemist: Brotherhood",
+                    "imageUrl": "https://cdn.myanimelist.net/images/anime/1208/94745.jpg",
+                    "status": "PLANNED"
+                  }
+                },
+                "completed": {
+                  "summary": "Completed with dates",
+                  "value": {
+                    "malId": 5114,
+                    "title": "Fullmetal Alchemist: Brotherhood",
+                    "status": "COMPLETED",
+                    "rating": 10,
+                    "completedAt": "2026-04-12",
+                    "completedDates": ["2026-04-12"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created entry.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnimeEntry" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (Zod) or business rule (completed fields without COMPLETED).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          },
+          "409": {
+            "description": "Duplicate `malId` (unique index).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorBody" },
+                "example": {
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "malId already exists",
+                    "details": [{ "path": "malId", "reason": "Duplicate value" }]
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      }
+    },
+    "/api/anime/{id}": {
+      "get": {
+        "tags": ["Anime"],
+        "summary": "Get anime entry by id",
+        "parameters": [{ "$ref": "#/components/parameters/EntryId" }],
+        "responses": {
+          "200": {
+            "description": "Entry document.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnimeEntry" } } }
+          },
+          "404": {
+            "description": "Not found or invalid ObjectId (invalid id is treated as not found for GET).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Anime"],
+        "summary": "Partially update anime entry",
+        "description": "Partial update. When `status` changes, the server validates allowed transitions (see **409**). `completedAt` / `completedDates` may only be sent when the resulting `status` is `COMPLETED` (including unchanged COMPLETED); otherwise 400. Leaving `COMPLETED` for another status clears completion fields. Raw JSON must include keys to touch completion fields (defaults from the parser alone do not count as intent).",
+        "parameters": [{ "$ref": "#/components/parameters/EntryId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AnimeEntryPatch" },
+              "example": { "status": "COMPLETED", "rating": 10, "completedAt": "2026-04-20" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated entry.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnimeEntry" } } }
+          },
+          "400": {
+            "description": "Validation error or invalid use of completion fields for non-COMPLETED status.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          },
+          "404": {
+            "description": "Entry not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          },
+          "409": {
+            "description": "**State machine / invalid status transition.** Returned when `status` in the body requests a transition that is not allowed from the document's current `status`. Error code is always `INVALID_STATUS_TRANSITION`.\n\nAllowed edges (implemented): `PLANNED` → `WATCHING`, `ON_HOLD`, `DROPPED`, `COMPLETED`; `WATCHING` → `ON_HOLD`, `DROPPED`, `COMPLETED`; `ON_HOLD` → `WATCHING`, `DROPPED`, `COMPLETED`; `DROPPED` → `PLANNED` only (not directly to `WATCHING`); `COMPLETED` → `WATCHING` (re-watch). Any other change of `status` yields **409** with a human-readable `message` and `details[0].reason`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorBody" },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STATUS_TRANSITION",
+                    "message": "Invalid status transition: DROPPED -> WATCHING",
+                    "details": [{ "path": "status", "reason": "Invalid status transition: DROPPED -> WATCHING" }]
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Anime"],
+        "summary": "Delete anime entry",
+        "parameters": [{ "$ref": "#/components/parameters/EntryId" }],
+        "responses": {
+          "204": { "description": "Deleted or id not found (invalid ObjectId also yields 204)." },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      }
+    },
+    "/api/stats/heatmap": {
+      "get": {
+        "tags": ["Statistics"],
+        "summary": "Watch heatmap (planned contract)",
+        "description": "**Contract only (phase 2).** Aggregates `COMPLETED` entries by `completedDates` into weeks of daily `count` and `intensity` (0–4). Query parameters align with PROJECT_BLUEPRINT §3.7.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+            "description": "Range start (inclusive). Default: past 365 days from `to` (implementation choice)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+            "description": "Range end (inclusive). Default: today (implementation choice)."
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "example": "Europe/Berlin" },
+            "description": "Timezone identifier for bucketing (optional; default e.g. `Europe/Berlin` per blueprint)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Heatmap grid per blueprint §3.7.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HeatmapResponse" },
+                "example": {
+                  "from": "2025-04-20",
+                  "to": "2026-04-20",
+                  "weeks": [
+                    {
+                      "weekStart": "2026-04-13",
+                      "days": [
+                        { "date": "2026-04-13", "intensity": 0, "count": 0 },
+                        { "date": "2026-04-14", "intensity": 1, "count": 1 },
+                        { "date": "2026-04-15", "intensity": 0, "count": 0 },
+                        { "date": "2026-04-16", "intensity": 2, "count": 2 },
+                        { "date": "2026-04-17", "intensity": 0, "count": 0 },
+                        { "date": "2026-04-18", "intensity": 4, "count": 5 },
+                        { "date": "2026-04-19", "intensity": 0, "count": 0 }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "EntryId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "example": "65f0c1a2b3c4d5e6f7a8b9c0" },
+        "description": "MongoDB ObjectId string."
+      }
+    },
+    "schemas": {
+      "AnimeStatus": {
+        "type": "string",
+        "enum": ["PLANNED", "WATCHING", "ON_HOLD", "DROPPED", "COMPLETED"]
+      },
+      "DateYYYYMMDD": {
+        "type": "string",
+        "format": "date",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "description": "Calendar date `YYYY-MM-DD`."
+      },
+      "ApiErrorDetail": {
+        "type": "object",
+        "required": ["path", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      },
+      "ApiErrorBody": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["VALIDATION_ERROR", "NOT_FOUND", "INVALID_STATUS_TRANSITION", "INTERNAL_ERROR"]
+              },
+              "message": { "type": "string" },
+              "details": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/ApiErrorDetail" }
+              }
+            }
+          }
+        }
+      },
+      "AnimeEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "malId",
+          "title",
+          "status",
+          "completedDates",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": { "type": "string", "description": "Stringified MongoDB `_id`." },
+          "malId": { "type": "integer", "minimum": 0 },
+          "title": { "type": "string" },
+          "imageUrl": { "type": "string", "format": "uri" },
+          "status": { "$ref": "#/components/schemas/AnimeStatus" },
+          "rating": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "notes": { "type": "string" },
+          "startedAt": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "completedAt": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "completedDates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DateYYYYMMDD" }
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AnimeEntryCreate": {
+        "type": "object",
+        "required": ["malId", "title"],
+        "properties": {
+          "malId": { "type": "integer", "minimum": 0 },
+          "title": { "type": "string", "minLength": 1 },
+          "imageUrl": { "type": "string", "format": "uri" },
+          "status": { "$ref": "#/components/schemas/AnimeStatus", "default": "PLANNED" },
+          "rating": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "notes": { "type": "string", "maxLength": 5000 },
+          "startedAt": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "completedAt": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "completedDates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+            "default": []
+          }
+        }
+      },
+      "AnimeEntryPatch": {
+        "type": "object",
+        "description": "All fields optional (partial update). Same field constraints as create where applicable.",
+        "properties": {
+          "malId": { "type": "integer", "minimum": 0 },
+          "title": { "type": "string", "minLength": 1 },
+          "imageUrl": { "type": "string", "format": "uri" },
+          "status": { "$ref": "#/components/schemas/AnimeStatus" },
+          "rating": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "notes": { "type": "string", "maxLength": 5000 },
+          "startedAt": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "completedAt": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "completedDates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DateYYYYMMDD" }
+          }
+        }
+      },
+      "AnimeListPage": {
+        "type": "object",
+        "required": ["items", "page", "pageSize", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AnimeEntry" }
+          },
+          "page": { "type": "integer", "minimum": 1 },
+          "pageSize": { "type": "integer", "minimum": 1 },
+          "total": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "HeatmapDay": {
+        "type": "object",
+        "required": ["date", "intensity", "count"],
+        "properties": {
+          "date": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "intensity": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "HeatmapWeek": {
+        "type": "object",
+        "required": ["weekStart", "days"],
+        "properties": {
+          "weekStart": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "days": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/HeatmapDay" },
+            "minItems": 7,
+            "maxItems": 7
+          }
+        }
+      },
+      "HeatmapResponse": {
+        "type": "object",
+        "required": ["from", "to", "weeks"],
+        "properties": {
+          "from": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "to": { "$ref": "#/components/schemas/DateYYYYMMDD" },
+          "weeks": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/HeatmapWeek" }
+          }
+        },
+        "description": "Per PROJECT_BLUEPRINT §3.7: weeks cover the requested range; each week has seven `days` with `count` (raw completions) and `intensity` 0–4 from backend mapping."
+      }
+    }
+  }
+}

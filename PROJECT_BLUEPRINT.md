@@ -286,6 +286,29 @@
 
 ---
 
+### 3.10 NestJS Backend Migration（Next.js → NestJS，架构平移）
+
+> 目标：在 **不改变任何 API 字段名** 的前提下，将后端从 Next.js Route Handlers 平移到 NestJS，保持业务规则（状态机、完成日期维护、热力图聚合）与契约测试一致。
+
+#### 目录与端口约定
+
+- `anitrack/`：Next.js 前端（端口 `3000`）
+- `anitrack/anitrack-backend/`：NestJS 后端（端口 `3001`，全局前缀 `/api`，Swagger UI `/api-docs`，OpenAPI JSON `/swagger.json`）
+
+#### 分层架构（Controller / Service / Repository）
+
+- **Controller**：只负责路由与 DTO 校验，路径保持 `GET/POST /api/anime`、`GET/PATCH/DELETE /api/anime/:id`、`GET /api/stats/heatmap`
+- **Service（业务灵魂）**：承载状态机迁移校验、`COMPLETED` 自动维护 `completedAt/completedDates`、以及热力图统计逻辑
+- **Repository（Mongoose Model）**：通过 `@nestjs/mongoose` 注入 `AnimeEntry` 模型；索引（如 `malId unique`）保持一致
+
+#### 兼容性约束（必须保持）
+
+- **错误信封**：所有错误统一返回 `{ "error": { "code", "message", "details" } }`
+- **状态机**：遵循 §5.1 的 allowed edges（非法迁移返回 `409 INVALID_STATUS_TRANSITION`）
+- **热力图聚合**：保持 `$unwind` + 规范化（`$dateToString` / `$toString` + `$trim`）以兼容历史 `Date/string` 混存
+
+---
+
 ## 4. MongoDB 数据模型（Schema Design）
 
 > 目标：既能支撑 watchlist CRUD，也能支撑 heatmap 的日期维度统计，并且便于测试与聚合。
@@ -506,4 +529,5 @@
 - **`PATCH` 与 Zod 默认值**：`AnimeEntryPatch` 解析时可能为 `completedDates` 填入默认空数组；路由层判断“是否触碰完成日期字段”应以 **原始 JSON 是否包含对应 key** 为准，避免把“仅更新 status”误判为“在写 completed 字段”。
 - **热力图 Aggregation**：任何涉及 **日历字符串** 与 **BSON `Date`** 的 **Normalization** 必须在 **`$group` 之前**完成，且 **`$match` 闭区间** 作用于 **同一规范化字段**，否则易出现 **静默空结果**。
 - 防止启动打架**Set-Location "C:\Users\HP\Desktop\my_page"; npm run dev**
+- 页面 /：http://localhost:3000/（主页面），http://localhost:3000/api-docs#/（Swagger UI）
 

@@ -7,6 +7,9 @@ jspm_packages/
 out/
 build/
 
+# NestJS / Node 编译产物
+dist/
+
 # 环境文件 (保护你的 MongoDB 密码！)
 .env
 .env.*

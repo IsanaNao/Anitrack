@@ -13,9 +13,9 @@ function getOrigin() {
   const direct = process.env.CONTRACT_ORIGIN?.trim();
   if (direct) return normalizeOrigin(direct);
 
-  const base = normalizeOrigin(process.env.BASE_URL || "http://localhost:3000/api");
+  const base = normalizeOrigin(process.env.BASE_URL || "http://localhost:3001/api");
   if (base.endsWith("/api")) return base.slice(0, -4);
-  return base || "http://localhost:3000";
+  return base || "http://localhost:3001";
 }
 
 function getSwaggerUrl() {

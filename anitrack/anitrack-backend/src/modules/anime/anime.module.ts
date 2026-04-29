@@ -7,7 +7,9 @@ import { AnimeEntry, AnimeEntrySchema } from './schemas/anime-entry.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: AnimeEntry.name, schema: AnimeEntrySchema }]),
+    MongooseModule.forFeature([
+      { name: AnimeEntry.name, schema: AnimeEntrySchema },
+    ]),
     AnimeMetaModule,
   ],
   controllers: [AnimeController],
@@ -15,4 +17,3 @@ import { AnimeEntry, AnimeEntrySchema } from './schemas/anime-entry.schema';
   exports: [AnimeService],
 })
 export class AnimeModule {}
-

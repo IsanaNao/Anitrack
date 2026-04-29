@@ -65,15 +65,14 @@
 - [x] 数据提取：筛选 `status=COMPLETED`，读取 `completedDates`
 - [x] 计数聚合：按天 count（MongoDB **Aggregation Pipeline**：`$match` → `$unwind` → **`$addFields` 日期 Normalization**（`$dateToString` / `$trim`）→ 闭区间 `$match` → `$group`）
 - [x] **混合类型修复**：历史或驱动层导致的 **BSON `Date` / `string` 混存** 不再使 `$gte`/`$lte` 静默失败（曾表现为 **count 全 0**）
-- [x] 输出结构：按周 `weeks -> days` 填满日期范围（周一起算，首尾周补齐）
-- [x] 强度映射：0-4（纯函数 `calculateIntensity`，见 `src/lib/heatmapCalc.ts`）
-- [x] `GET /api/stats/heatmap`：`tz` 默认 `Europe/Berlin`，`from`/`to` 默认「今天往前 365 日」
+- [x] （历史/遗留）按天绿墙：曾输出 `weeks -> days`（`from/to`），作为阶段 2 的聚合与类型兼容性验证
+- [x] （现行）`GET /api/stats/heatmap`：升级为“人生纸格（月）”，支持 `start/end=YYYY-MM`，返回 `months[]`（added/completed/episodes + intensity）
 
 ### 3.2 单元测试（Unit）
 - [x] 强度映射与周结构：`src/lib/__tests__/heatmap-calc.test.ts`（Vitest）
 
 ### 3.3 集成测试（Integration，Vitest）
-- [x] `npm run test:integration`：`src/__tests__/integration/heatmap.integration.test.ts`（真实 Mongo + 直接调用 `GET` handler；插入 COMPLETED 后断言目标日 **count > 0**；`weeks` 结构与 `public/swagger.json` 中 **HeatmapResponse** 对齐）
+- [x] `npm run test:integration`：`src/__tests__/integration/heatmap.integration.test.ts`（断言 Next.js `app/api/stats/heatmap` 已变为 **NestJS 代理**：转发 `start/end/tz` 并返回 `{ start,end,months[] }`）
 - [ ] Case C：heatmap 参数错误（400 + 错误体）可选加分
 
 ### 3.4 自动化播种与契约回归
@@ -101,9 +100,12 @@
 - [ ] CRUD 完整交互：编辑/删除/状态迁移 UI（下一步）
 
 ### 4.3 Heatmap（绿墙）
-- [ ] 拉取 `/api/stats/heatmap`
-- [ ] 强度 → 颜色映射（5 档）
-- [ ] 手机端 `overflow-x-auto` 横向滚动
+### 4.3 人生纸格（月 Heatmap）
+- [x] 拉取 `/api/stats/heatmap?start=YYYY-MM`
+- [x] 年-月坐标系：纵轴 12 行（Jan–Dec），横轴年份列（起始年→当前年），支持起始偏移与“未来月份解锁”
+- [x] 悬停提示：GitHub 风格浮动 Tooltip（`pointer-events: none`）展示 added/completed/episodes
+- [x] 点击锁定：选中格子高亮（`ring-2 ring-blue-500`），下方展示 “Activity for YYYY-MM”（Added/Completed 时间轴列表）
+- [x] 口径统一：Activity 列表使用 `dayjs.utc(...).format('YYYY-MM')` 与后端 UTC 月聚合对齐，修复“Tooltip 有数据但列表为空”
 
 ### 4.4 Seasonal Schedule（Jikan）
 - [ ] 获取当前季度 schedule（直连或走后端代理）
@@ -154,9 +156,10 @@
   - 后端：引入 `@CurrentUser()`（dev fallback 仍为 `TEMP_USER_ID`），清理业务层散落的 userId 读取
   - 后端：`GET /api/anime-meta/search` 支持 `page/pageSize`，并返回 Jikan `pagination`（完整透传）
   - 后端：`AnimeMeta` 扩字段 `synopsis/genres(string[])/totalEpisodes`；`AnimeEntry` 新增 `episodesWatched`
-  - 前端：搜索体验升级（debounce 500ms + Enter 立即搜 + 分页器）；搜索结果中已存在条目显示“已在清单”
+  - 前端：搜索体验升级（debounce 500ms + Enter 立即搜 + 分页器）；搜索结果中已存在条目显示“已在清单”；新增“智能提示 Banner + 搜索建议标签”（面向大型系列，如 Love Live）
   - 前端：Library 采用“全局单实例 Dialog”编辑条目（status/rating/episodesWatched）+ 删除；所有写操作统一 `invalidateQueries(["anime"])`
-  - 前端：`/profile` 使用 `react-calendar-heatmap` 渲染绿墙，并做空数据保护（values=`[]`），增加统计卡片
+  - 前端：`/profile` 从“过去一年日历绿墙”升级为“人生纸格（月）”，支持自定义起始月份（先以 `START_DATE` 常量占位），并提供悬停详情（added/completed/episodes）
+  - 前端：热力图进一步重构为“年(横轴)×月(纵轴)”坐标系 + 浮动 Tooltip + 点击 Activity 列表；Next.js `app/api/stats/heatmap` 统一为 NestJS 代理
 
 ---
 

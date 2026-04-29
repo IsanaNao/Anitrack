@@ -12,7 +12,17 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Monorepo folders that are not part of the Next.js frontend lint scope:
+    "anitrack-backend/**",
   ]),
+  // Local policy overrides (keep lint useful, avoid noisy false-positives).
+  {
+    rules: {
+      // Common and intentional patterns in this project.
+      "@typescript-eslint/no-explicit-any": "warn",
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

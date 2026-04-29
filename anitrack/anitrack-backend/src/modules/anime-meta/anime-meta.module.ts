@@ -5,10 +5,13 @@ import { AnimeMetaService } from './anime-meta.service';
 import { AnimeMeta, AnimeMetaSchema } from './schemas/anime-meta.schema';
 
 @Module({
-  imports: [MongooseModule.forFeature([{ name: AnimeMeta.name, schema: AnimeMetaSchema }])],
+  imports: [
+    MongooseModule.forFeature([
+      { name: AnimeMeta.name, schema: AnimeMetaSchema },
+    ]),
+  ],
   controllers: [AnimeMetaController],
   providers: [AnimeMetaService],
   exports: [AnimeMetaService],
 })
 export class AnimeMetaModule {}
-

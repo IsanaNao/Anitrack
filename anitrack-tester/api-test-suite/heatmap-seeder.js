@@ -1,6 +1,10 @@
 /**
- * 向本地 API 播种约 20 条 COMPLETED 记录，completedDates 集中在若干天，
- * 便于热力图强度 0–4 与颜色阶梯联调。
+ * 向本地 API 播种若干条 COMPLETED 记录（跨多个月），用于“人生纸格（月）”联调：
+ * - completedCount：按 completedAt 的月份计数
+ * - episodeCount：按 completedAt 的月份累加 episodesWatched
+ *
+ * 注意：addedCount 由条目的 createdAt 决定（服务器时间戳），HTTP 播种无法回填历史 createdAt；
+ * 因此本脚本主要用于联调 completed/episodes 与月格子的色阶/tooltip。
  *
  * 说明：本脚本**不会**清空数据库，仅通过 POST 追加数据；若 malId 冲突会自动换一批随机 id 重试。
  *
@@ -37,17 +41,13 @@ async function postAnime(body) {
   return { res, json, text };
 }
 
-/** 每条 { titleSuffix, date } 会 POST 一条 COMPLETED，completedDates 仅含该日 */
+/** 每条会 POST 一条 COMPLETED，按 completedAt 跨月分布 */
 const PLAN = [
-  ...Array.from({ length: 1 }, (_, i) => ({ day: "2026-04-15", tag: `d15-${i}` })),
-  ...Array.from({ length: 5 }, (_, i) => ({ day: "2026-04-16", tag: `d16-${i}` })),
-  ...Array.from({ length: 2 }, (_, i) => ({ day: "2026-04-17", tag: `d17-${i}` })),
-  ...Array.from({ length: 3 }, (_, i) => ({ day: "2026-04-18", tag: `d18-${i}` })),
-  ...Array.from({ length: 4 }, (_, i) => ({ day: "2026-04-19", tag: `d19-${i}` })),
-  ...Array.from({ length: 2 }, (_, i) => ({ day: "2026-04-14", tag: `d14-${i}` })),
-  ...Array.from({ length: 1 }, (_, i) => ({ day: "2026-04-13", tag: `d13-${i}` })),
-  ...Array.from({ length: 1 }, (_, i) => ({ day: "2026-04-12", tag: `d12-${i}` })),
-  ...Array.from({ length: 1 }, (_, i) => ({ day: "2026-04-11", tag: `d11-${i}` })),
+  ...Array.from({ length: 2 }, (_, i) => ({ day: "2025-12-18", tag: `m12-${i}`, eps: 12 + i })),
+  ...Array.from({ length: 3 }, (_, i) => ({ day: "2026-01-12", tag: `m01-${i}`, eps: 24 + i })),
+  ...Array.from({ length: 1 }, (_, i) => ({ day: "2026-02-03", tag: `m02-${i}`, eps: 10 + i })),
+  ...Array.from({ length: 4 }, (_, i) => ({ day: "2026-03-20", tag: `m03-${i}`, eps: 48 + i })),
+  ...Array.from({ length: 5 }, (_, i) => ({ day: "2026-04-16", tag: `m04-${i}`, eps: 12 + i })),
 ];
 
 async function main() {
@@ -56,14 +56,14 @@ async function main() {
   const createdIds = [];
 
   for (let i = 0; i < PLAN.length; i++) {
-    const { day, tag } = PLAN[i];
+    const { day, tag, eps } = PLAN[i];
     let malId = baseMal + i;
     const body = {
       malId,
-      title: `Heatmap seed ${day} ${tag}`,
       status: "COMPLETED",
       completedAt: day,
       completedDates: [day],
+      episodesWatched: eps ?? 0,
     };
 
     let { res, json, text } = await postAnime(body);
@@ -92,7 +92,7 @@ async function main() {
   console.log("播种成功：已追加", createdIds.length, "条 COMPLETED（未清空数据库）。");
   console.log("────────────────────────────────────────");
   console.log(
-    "浏览器联调：http://localhost:3000/api/stats/heatmap?from=2026-04-11&to=2026-04-20&tz=Europe/Berlin",
+    "浏览器联调：http://localhost:3000/profile （或直接请求后端：/api/stats/heatmap?start=2025-12&end=2026-04）",
   );
 }
 

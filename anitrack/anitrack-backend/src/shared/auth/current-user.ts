@@ -23,8 +23,9 @@ function resolveCurrentUser(req: RequestWithUser): CurrentUser {
   return { id: TEMP_USER_ID };
 }
 
-export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext) => {
-  const req = ctx.switchToHttp().getRequest<RequestWithUser>();
-  return resolveCurrentUser(req);
-});
-
+export const CurrentUser = createParamDecorator(
+  (_: unknown, ctx: ExecutionContext) => {
+    const req = ctx.switchToHttp().getRequest<RequestWithUser>();
+    return resolveCurrentUser(req);
+  },
+);

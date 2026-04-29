@@ -7,7 +7,11 @@ import {
   type AnimeStatus,
   todayYYYYMMDD,
 } from './anime.constants';
-import { AnimeEntryCreateDto, AnimeEntryPatchDto, AnimeListQueryDto } from './dto/anime-entry.dto';
+import {
+  AnimeEntryCreateDto,
+  AnimeEntryPatchDto,
+  AnimeListQueryDto,
+} from './dto/anime-entry.dto';
 import { AnimeEntry, AnimeEntryDocument } from './schemas/anime-entry.schema';
 import { AnimeMetaService } from '../anime-meta/anime-meta.service';
 
@@ -18,7 +22,8 @@ function isValidObjectId(id: string) {
 @Injectable()
 export class AnimeService implements OnModuleInit {
   constructor(
-    @InjectModel(AnimeEntry.name) private readonly model: Model<AnimeEntryDocument>,
+    @InjectModel(AnimeEntry.name)
+    private readonly model: Model<AnimeEntryDocument>,
     private readonly animeMeta: AnimeMetaService,
   ) {}
 
@@ -27,8 +32,11 @@ export class AnimeService implements OnModuleInit {
       return await this.animeMeta.getOrFetchByMalId(malId);
     } catch (e: any) {
       // Soft mode: do not fail the request if upstream/meta cache fails.
-      // eslint-disable-next-line no-console
-      console.error('[anitrack-backend] AnimeMeta fetch failed (soft mode):', e?.message ?? e);
+
+      console.error(
+        '[anitrack-backend] AnimeMeta fetch failed (soft mode):',
+        e?.message ?? e,
+      );
       return null;
     }
   }
@@ -40,14 +48,17 @@ export class AnimeService implements OnModuleInit {
       await this.model.syncIndexes();
     } catch (e: any) {
       // When Mongo connection is disabled/unavailable (lazyConnection / no DB), keep the app bootable for Swagger.
-      // eslint-disable-next-line no-console
+
       console.warn('[anitrack-backend] syncIndexes skipped:', e?.message ?? e);
     }
   }
 
   async list(userId: string, query: AnimeListQueryDto) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize ?? 20) || 20));
+    const pageSize = Math.min(
+      100,
+      Math.max(1, Number(query.pageSize ?? 20) || 20),
+    );
     const sortParam = query.sort ?? 'updatedAt:desc';
 
     const filter: Record<string, unknown> = {};
@@ -56,7 +67,9 @@ export class AnimeService implements OnModuleInit {
 
     const [sortFieldRaw, sortDirRaw] = String(sortParam).split(':');
     const sortField =
-      sortFieldRaw === 'updatedAt' || sortFieldRaw === 'createdAt' || sortFieldRaw === 'rating'
+      sortFieldRaw === 'updatedAt' ||
+      sortFieldRaw === 'createdAt' ||
+      sortFieldRaw === 'rating'
         ? sortFieldRaw
         : 'updatedAt';
     const sortDir = sortDirRaw === 'asc' ? 1 : -1;
@@ -70,7 +83,9 @@ export class AnimeService implements OnModuleInit {
 
     const malIds = Array.from(new Set(items.map((d) => d.malId)));
     const metas = await this.animeMeta.findByMalIds(malIds);
-    const metaByMalId = new Map<number, any>(metas.map((m: any) => [m.malId, m]));
+    const metaByMalId = new Map<number, any>(
+      metas.map((m: any) => [m.malId, m]),
+    );
 
     return {
       items: items.map((d) => {
@@ -96,8 +111,14 @@ export class AnimeService implements OnModuleInit {
           'VALIDATION_ERROR',
           'completedAt/completedDates are only allowed when status=COMPLETED',
           [
-            { path: 'completedAt', reason: 'Only allowed when status=COMPLETED' },
-            { path: 'completedDates', reason: 'Only allowed when status=COMPLETED' },
+            {
+              path: 'completedAt',
+              reason: 'Only allowed when status=COMPLETED',
+            },
+            {
+              path: 'completedDates',
+              reason: 'Only allowed when status=COMPLETED',
+            },
           ],
         );
       }
@@ -107,7 +128,9 @@ export class AnimeService implements OnModuleInit {
     let completedDates = dto.completedDates ?? [];
     if (status === 'COMPLETED') {
       completedAt = completedAt ?? todayYYYYMMDD();
-      completedDates = Array.from(new Set([...(completedDates ?? []), completedAt]));
+      completedDates = Array.from(
+        new Set([...(completedDates ?? []), completedAt]),
+      );
     } else {
       completedAt = undefined;
       completedDates = [];
@@ -126,9 +149,12 @@ export class AnimeService implements OnModuleInit {
       return json;
     } catch (e: any) {
       if (e?.code === 11000) {
-        throw new ApiErrorException(409, 'VALIDATION_ERROR', 'malId already exists for this user', [
-          { path: 'malId', reason: 'Duplicate value (userId+malId)' },
-        ]);
+        throw new ApiErrorException(
+          409,
+          'VALIDATION_ERROR',
+          'malId already exists for this user',
+          [{ path: 'malId', reason: 'Duplicate value (userId+malId)' }],
+        );
       }
       throw e;
     }
@@ -139,7 +165,8 @@ export class AnimeService implements OnModuleInit {
       throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     }
     const doc = await this.model.findOne({ _id: id, userId });
-    if (!doc) throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
+    if (!doc)
+      throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     const json = doc.toJSON() as any;
     json.animeMeta = await this.getMetaSoft(doc.malId);
     return json;
@@ -156,19 +183,27 @@ export class AnimeService implements OnModuleInit {
     }
 
     const existing = await this.model.findOne({ _id: id, userId });
-    if (!existing) throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
+    if (!existing)
+      throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
 
-    const fromStatus = existing.status as AnimeStatus;
-    const toStatus = ((dto.status ?? existing.status) as unknown as AnimeStatus) ?? fromStatus;
+    const fromStatus = existing.status;
+    const toStatus =
+      ((dto.status ?? existing.status) as unknown as AnimeStatus) ?? fromStatus;
 
     if (dto.status && dto.status !== existing.status) {
       try {
-        assertAllowedStatusTransition(fromStatus, dto.status as unknown as AnimeStatus);
+        assertAllowedStatusTransition(
+          fromStatus,
+          dto.status as unknown as AnimeStatus,
+        );
       } catch (e: any) {
         if (e?.code === 'INVALID_STATUS_TRANSITION') {
-          throw new ApiErrorException(409, 'INVALID_STATUS_TRANSITION', e.message, [
-            { path: 'status', reason: e.message },
-          ]);
+          throw new ApiErrorException(
+            409,
+            'INVALID_STATUS_TRANSITION',
+            e.message,
+            [{ path: 'status', reason: e.message }],
+          );
         }
         throw e;
       }
@@ -185,7 +220,10 @@ export class AnimeService implements OnModuleInit {
         'completedAt/completedDates are only allowed when status=COMPLETED',
         [
           { path: 'completedAt', reason: 'Only allowed when status=COMPLETED' },
-          { path: 'completedDates', reason: 'Only allowed when status=COMPLETED' },
+          {
+            path: 'completedDates',
+            reason: 'Only allowed when status=COMPLETED',
+          },
         ],
       );
     }
@@ -199,28 +237,35 @@ export class AnimeService implements OnModuleInit {
 
     if (toStatus === 'COMPLETED') {
       const completedAt =
-        (dto.completedAt as string | undefined) ??
-        (existing.completedAt as string | undefined) ??
-        todayYYYYMMDD();
+        dto.completedAt ?? existing.completedAt ?? todayYYYYMMDD();
 
       const mergedDates = [
-        ...((existing.completedDates as unknown as string[]) ?? []),
-        ...((dto.completedDates as unknown as string[] | undefined) ?? []),
+        ...(existing.completedDates ?? []),
+        ...(dto.completedDates ?? []),
         completedAt,
       ];
 
       update.completedAt = completedAt;
       update.completedDates = Array.from(new Set(mergedDates));
-    } else if (existing.status === 'COMPLETED' && dto.status && dto.status !== 'COMPLETED') {
+    } else if (
+      existing.status === 'COMPLETED' &&
+      dto.status &&
+      dto.status !== 'COMPLETED'
+    ) {
       update.completedAt = undefined;
       update.completedDates = [];
     }
 
-    const updated = await this.model.findOneAndUpdate({ _id: id, userId }, update, {
-      new: true,
-      runValidators: true,
-    });
-    if (!updated) throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
+    const updated = await this.model.findOneAndUpdate(
+      { _id: id, userId },
+      update,
+      {
+        new: true,
+        runValidators: true,
+      },
+    );
+    if (!updated)
+      throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     const json = updated.toJSON() as any;
     json.animeMeta = await this.getMetaSoft(updated.malId);
     return json;
@@ -231,4 +276,3 @@ export class AnimeService implements OnModuleInit {
     await this.model.findOneAndDelete({ _id: id, userId });
   }
 }
-

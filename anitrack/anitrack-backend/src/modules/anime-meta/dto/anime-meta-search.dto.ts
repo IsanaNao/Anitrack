@@ -31,4 +31,3 @@ export type AnimeMetaSearchResponseDto = {
   items: any[];
   pagination: JikanPagination;
 };
-

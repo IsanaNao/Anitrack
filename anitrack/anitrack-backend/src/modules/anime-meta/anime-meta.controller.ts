@@ -11,9 +11,12 @@ export class AnimeMetaController {
   async search(@Query() query: AnimeMetaSearchQueryDto) {
     const q = (query?.q ?? '').trim();
     if (!q) {
-      throw new ApiErrorException(400, 'VALIDATION_ERROR', 'Missing query parameter: q', [
-        { path: 'q', reason: 'Required' },
-      ]);
+      throw new ApiErrorException(
+        400,
+        'VALIDATION_ERROR',
+        'Missing query parameter: q',
+        [{ path: 'q', reason: 'Required' }],
+      );
     }
     return this.animeMeta.searchAndUpsert(q, {
       page: query.page,
@@ -21,4 +24,3 @@ export class AnimeMetaController {
     });
   }
 }
-

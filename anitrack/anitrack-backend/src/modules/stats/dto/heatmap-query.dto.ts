@@ -2,20 +2,19 @@ import { IsOptional, IsString, Matches, MinLength } from 'class-validator';
 
 export class HeatmapQueryDto {
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'Invalid date format (expected YYYY-MM-DD)',
+  @Matches(/^\d{4}-\d{2}$/, {
+    message: 'Invalid month format (expected YYYY-MM)',
   })
-  from?: string;
+  start?: string;
 
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'Invalid date format (expected YYYY-MM-DD)',
+  @Matches(/^\d{4}-\d{2}$/, {
+    message: 'Invalid month format (expected YYYY-MM)',
   })
-  to?: string;
+  end?: string;
 
   @IsOptional()
   @IsString()
   @MinLength(1, { message: 'tz must be non-empty when provided' })
   tz?: string;
 }
-

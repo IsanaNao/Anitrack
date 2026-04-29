@@ -81,7 +81,11 @@ export class ApiErrorExceptionFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const body = exception.getResponse() as any;
 
-      if (body?.error?.code && body?.error?.message && Array.isArray(body?.error?.details)) {
+      if (
+        body?.error?.code &&
+        body?.error?.message &&
+        Array.isArray(body?.error?.details)
+      ) {
         return res.status(status).json(body);
       }
 
@@ -95,7 +99,8 @@ export class ApiErrorExceptionFilter implements ExceptionFilter {
 
       return res.status(status).json({
         error: {
-          code: status === HttpStatus.NOT_FOUND ? 'NOT_FOUND' : 'VALIDATION_ERROR',
+          code:
+            status === HttpStatus.NOT_FOUND ? 'NOT_FOUND' : 'VALIDATION_ERROR',
           message,
           details: [],
         },
@@ -103,8 +108,11 @@ export class ApiErrorExceptionFilter implements ExceptionFilter {
     }
 
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: 'Unexpected server error', details: [] },
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Unexpected server error',
+        details: [],
+      },
     });
   }
 }
-

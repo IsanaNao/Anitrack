@@ -33,7 +33,9 @@ async function bootstrap() {
   );
 
   SwaggerModule.setup('api-docs', app, contract);
-  app.use('/swagger.json', (_req: Request, res: Response) => res.json(contract));
+  app.use('/swagger.json', (_req: Request, res: Response) =>
+    res.json(contract),
+  );
 
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);

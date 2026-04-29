@@ -26,8 +26,10 @@ import { StatsModule } from './modules/stats/stats.module';
           // 允许在未配置真实 Atlas 时先启动 Swagger/开发服务器；
           // 若本机无 MongoDB，相关接口会在连接失败时返回错误或重试日志。
           // 真实协作时请在 `.env` 中配置 MONGODB_URI。
-          // eslint-disable-next-line no-console
-          console.warn('[anitrack-backend] Missing MONGODB_URI; falling back to localhost MongoDB.');
+
+          console.warn(
+            '[anitrack-backend] Missing MONGODB_URI; falling back to localhost MongoDB.',
+          );
         }
         return {
           uri: uri || 'mongodb://127.0.0.1:27017/anitrack',

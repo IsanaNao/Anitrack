@@ -8,7 +8,10 @@ export const AnimeStatusValues = [
 
 export type AnimeStatus = (typeof AnimeStatusValues)[number];
 
-export function assertAllowedStatusTransition(from: AnimeStatus, to: AnimeStatus) {
+export function assertAllowedStatusTransition(
+  from: AnimeStatus,
+  to: AnimeStatus,
+) {
   if (from === to) return;
 
   const allowed: Record<AnimeStatus, AnimeStatus[]> = {
@@ -29,4 +32,3 @@ export function assertAllowedStatusTransition(from: AnimeStatus, to: AnimeStatus
 export function todayYYYYMMDD(): string {
   return new Date().toISOString().slice(0, 10);
 }
-

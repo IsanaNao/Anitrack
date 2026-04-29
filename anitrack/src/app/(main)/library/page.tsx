@@ -48,6 +48,7 @@ export default function LibraryPage() {
   const qTrimmed = q.trim();
   const debouncedQuery = useDebouncedValue(qTrimmed, 500);
   const enterSearchRef = useRef(0);
+  const suggestionAppliedRef = useRef(0);
 
   const list = useQuery({
     queryKey: ["anime", "list", { status, page, pageSize, sort }],
@@ -104,6 +105,30 @@ export default function LibraryPage() {
     }
   }
 
+  const searchTips = useMemo(() => {
+    const raw = qTrimmed.toLowerCase().replace(/\s+/g, " ").trim();
+    const isLoveLive = raw.includes("lovelive") || raw.includes("love live");
+    if (!raw) return null;
+
+    const resultCount = searchResults.length;
+    const shouldNudge = isLoveLive && resultCount > 0 && resultCount < 6;
+    if (!shouldNudge) return null;
+
+    const suggestions = [
+      "Love Live Superstar",
+      "Love Live Sunshine",
+      "Love Live Nijigasaki",
+      "Love Live School Idol Project",
+    ];
+
+    return {
+      show: true,
+      message:
+        "没找到想要的结果？大型系列番剧（如 Love Live!）建议搜索其副标题（如 “Superstar” 或 “Sunshine”）以获得更精准的结果。",
+      suggestions,
+    };
+  }, [qTrimmed, searchResults.length]);
+
   useEffect(() => {
     // Debounce auto search: query changes → reset page → auto search
     setSearchPage(1);
@@ -114,6 +139,8 @@ export default function LibraryPage() {
     // If user pressed Enter recently, skip debounce-triggered run.
     const enterAt = enterSearchRef.current;
     if (Date.now() - enterAt < 300) return;
+    const appliedAt = suggestionAppliedRef.current;
+    if (Date.now() - appliedAt < 300) return;
     void onSearch({ page: searchPage });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery, searchPage]);
@@ -189,46 +216,76 @@ export default function LibraryPage() {
                 请输入关键词（支持 500ms 防抖自动搜索，Enter 立即搜索）
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {searchResults.map((m) => (
-                  <div
-                    key={m.malId}
-                    className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
-                  >
-                    <div className="h-16 w-12 overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-900">
-                      {m.imageUrl ? (
-                        <img
-                          src={m.imageUrl}
-                          alt={m.title}
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : null}
+              <div className="grid gap-3">
+                {searchTips?.show ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                    <div className="font-semibold">搜索建议</div>
+                    <div className="mt-1 text-amber-800 dark:text-amber-200">
+                      {searchTips.message}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold">{m.title}</div>
-                      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        malId: {m.malId}
-                      </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {searchTips.suggestions.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          className="h-8 rounded-full border border-amber-200 bg-white px-3 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
+                          onClick={() => {
+                            suggestionAppliedRef.current = Date.now();
+                            setQ(s);
+                            setSearchPage(1);
+                            void onSearch({ page: 1, immediate: true });
+                          }}
+                          disabled={searching}
+                          title="点击直接填充关键词并搜索"
+                        >
+                          {s}
+                        </button>
+                      ))}
                     </div>
-                    {myMalIdSet.has(m.malId) ? (
-                      <button
-                        className="h-9 shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500"
-                        disabled
-                      >
-                        已在清单
-                      </button>
-                    ) : (
-                      <button
-                        className="h-9 shrink-0 rounded-md bg-zinc-900 px-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-black dark:hover:bg-white"
-                        onClick={() => void onAdd(m.malId)}
-                        disabled={addingMalId === m.malId}
-                      >
-                        {addingMalId === m.malId ? "添加中…" : "添加"}
-                      </button>
-                    )}
                   </div>
-                ))}
+                ) : null}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {searchResults.map((m) => (
+                    <div
+                      key={m.malId}
+                      className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                    >
+                      <div className="h-16 w-12 overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-900">
+                        {m.imageUrl ? (
+                          <img
+                            src={m.imageUrl}
+                            alt={m.title}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">{m.title}</div>
+                        <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          malId: {m.malId}
+                        </div>
+                      </div>
+                      {myMalIdSet.has(m.malId) ? (
+                        <button
+                          className="h-9 shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500"
+                          disabled
+                        >
+                          已在清单
+                        </button>
+                      ) : (
+                        <button
+                          className="h-9 shrink-0 rounded-md bg-zinc-900 px-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-black dark:hover:bg-white"
+                          onClick={() => void onAdd(m.malId)}
+                          disabled={addingMalId === m.malId}
+                        >
+                          {addingMalId === m.malId ? "添加中…" : "添加"}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

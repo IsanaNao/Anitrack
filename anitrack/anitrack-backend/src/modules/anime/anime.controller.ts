@@ -12,9 +12,16 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { AnimeEntryCreateDto, AnimeEntryPatchDto, AnimeListQueryDto } from './dto/anime-entry.dto';
+import {
+  AnimeEntryCreateDto,
+  AnimeEntryPatchDto,
+  AnimeListQueryDto,
+} from './dto/anime-entry.dto';
 import { AnimeService } from './anime.service';
-import { CurrentUser, type CurrentUser as CurrentUserType } from '../../shared/auth/current-user';
+import {
+  CurrentUser,
+  type CurrentUser as CurrentUserType,
+} from '../../shared/auth/current-user';
 
 @ApiTags('Anime')
 @Controller('anime')
@@ -24,14 +31,20 @@ export class AnimeController {
   @Get()
   @ApiOperation({ summary: 'List anime entries' })
   @ApiResponse({ status: 200 })
-  async list(@Query() query: AnimeListQueryDto, @CurrentUser() user: CurrentUserType) {
+  async list(
+    @Query() query: AnimeListQueryDto,
+    @CurrentUser() user: CurrentUserType,
+  ) {
     return this.anime.list(user.id, query);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create anime entry' })
   @ApiResponse({ status: 201 })
-  async create(@Body() body: AnimeEntryCreateDto, @CurrentUser() user: CurrentUserType) {
+  async create(
+    @Body() body: AnimeEntryCreateDto,
+    @CurrentUser() user: CurrentUserType,
+  ) {
     return this.anime.create(user.id, body);
   }
 
@@ -67,4 +80,3 @@ export class AnimeController {
     return;
   }
 }
-

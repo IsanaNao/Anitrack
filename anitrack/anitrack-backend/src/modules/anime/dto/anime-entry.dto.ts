@@ -125,11 +125,9 @@ export class AnimeListQueryDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(100)
   pageSize?: number;
 
   @IsOptional()
   @IsString()
   sort?: string;
 }
-

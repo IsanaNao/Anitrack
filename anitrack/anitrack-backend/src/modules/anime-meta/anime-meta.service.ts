@@ -34,12 +34,98 @@ type JikanSearchResponse = {
 @Injectable()
 export class AnimeMetaService {
   constructor(
-    @InjectModel(AnimeMeta.name) private readonly model: Model<AnimeMetaDocument>,
+    @InjectModel(AnimeMeta.name)
+    private readonly model: Model<AnimeMetaDocument>,
     private readonly config: ConfigService,
   ) {}
 
   private jikanBaseUrl() {
-    return (this.config.get<string>('JIKAN_BASE_URL') ?? 'https://api.jikan.moe/v4').replace(/\/+$/, '');
+    return (
+      this.config.get<string>('JIKAN_BASE_URL') ?? 'https://api.jikan.moe/v4'
+    ).replace(/\/+$/, '');
+  }
+
+  private buildQueryVariants(input: string): string[] {
+    const q = input.trim();
+    if (!q) return [];
+
+    const out: string[] = [];
+    const push = (s: string) => {
+      const v = s.trim().replace(/\s+/g, ' ');
+      if (!v) return;
+      if (out.some((x) => x.toLowerCase() === v.toLowerCase())) return;
+      out.push(v);
+    };
+
+    push(q);
+
+    // If user typed without spaces (common on mobile), try a few lightweight variants.
+    if (!/\s/.test(q)) {
+      // Replace common separators.
+      push(q.replace(/[-_]+/g, ' '));
+
+      // Heuristic for "lovelive" style: insert a space between two alphabetic runs.
+      // This is intentionally simple; it just provides better recall for known franchises.
+      const alpha = q.replace(/[^a-zA-Z0-9]/g, '');
+      if (alpha.length >= 8 && /^[a-zA-Z]+$/.test(alpha)) {
+        for (let i = 3; i <= Math.min(alpha.length - 3, 6); i++) {
+          push(`${alpha.slice(0, i)} ${alpha.slice(i)}`);
+        }
+      }
+    }
+
+    return out;
+  }
+
+  private async jikanSearchOnce(args: {
+    q: string;
+    page: number;
+    limit: number;
+  }) {
+    const baseUrl = this.jikanBaseUrl();
+    const url = `${baseUrl}/anime?q=${encodeURIComponent(args.q)}&page=${encodeURIComponent(String(args.page))}&limit=${encodeURIComponent(String(args.limit))}&sfw=true`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { accept: 'application/json' } });
+    } catch (e: any) {
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        `Failed to reach Jikan API: ${e?.message ?? e}`,
+      );
+    }
+
+    if (res.status === 429) {
+      const retryAfter = res.headers.get('retry-after');
+      const hint = retryAfter ? ` (retry-after=${retryAfter}s)` : '';
+      throw new ApiErrorException(
+        429,
+        'UPSTREAM_RATE_LIMIT',
+        `Jikan rate limit exceeded${hint}`,
+      );
+    }
+
+    if (!res.ok) {
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        `Jikan API returned HTTP ${res.status}`,
+      );
+    }
+
+    let json: JikanSearchResponse;
+    try {
+      json = (await res.json()) as JikanSearchResponse;
+    } catch {
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        'Jikan API returned invalid JSON',
+      );
+    }
+
+    return json;
   }
 
   async findByMalIds(malIds: number[]) {
@@ -48,7 +134,9 @@ export class AnimeMetaService {
     return docs.map((d) => d.toJSON());
   }
 
-  private normalizeGenres(genres: Array<{ name?: string | null }> | null | undefined): string[] | undefined {
+  private normalizeGenres(
+    genres: Array<{ name?: string | null }> | null | undefined,
+  ): string[] | undefined {
     const names = (genres ?? [])
       .map((g) => (g?.name ?? '').trim())
       .filter((s) => Boolean(s));
@@ -64,34 +152,40 @@ export class AnimeMetaService {
     return out;
   }
 
-  async searchAndUpsert(q: string, opts?: { page?: number; pageSize?: number }) {
+  async searchAndUpsert(
+    q: string,
+    opts?: { page?: number; pageSize?: number },
+  ) {
     const page = Math.max(1, Number(opts?.page ?? 1) || 1);
     const limit = Math.max(1, Math.min(25, Number(opts?.pageSize ?? 10) || 10));
-    const baseUrl = this.jikanBaseUrl();
-    const url = `${baseUrl}/anime?q=${encodeURIComponent(q)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(limit))}`;
+    const variants = this.buildQueryVariants(q);
 
-    let res: Response;
-    try {
-      res = await fetch(url, { headers: { accept: 'application/json' } });
-    } catch (e: any) {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', `Failed to reach Jikan API: ${e?.message ?? e}`);
-    }
+    // Strategy:
+    // - Always try the original query first.
+    // - If results are sparse AND we have variants, try one more best-effort query and merge.
+    const first = await this.jikanSearchOnce({
+      q: variants[0] ?? q,
+      page,
+      limit,
+    });
+    let json: JikanSearchResponse = first;
 
-    if (res.status === 429) {
-      const retryAfter = res.headers.get('retry-after');
-      const hint = retryAfter ? ` (retry-after=${retryAfter}s)` : '';
-      throw new ApiErrorException(429, 'UPSTREAM_RATE_LIMIT', `Jikan rate limit exceeded${hint}`);
-    }
-
-    if (!res.ok) {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', `Jikan API returned HTTP ${res.status}`);
-    }
-
-    let json: JikanSearchResponse;
-    try {
-      json = (await res.json()) as JikanSearchResponse;
-    } catch {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', 'Jikan API returned invalid JSON');
+    const firstCount = (first?.data ?? []).length;
+    if (
+      variants.length > 1 &&
+      firstCount < Math.max(3, Math.floor(limit / 3))
+    ) {
+      // Second attempt: pick the first variant that differs from the original.
+      const secondQ = variants
+        .slice(1)
+        .find((v) => v.toLowerCase() !== (variants[0] ?? q).toLowerCase());
+      if (secondQ) {
+        const second = await this.jikanSearchOnce({ q: secondQ, page, limit });
+        json = {
+          pagination: first.pagination ?? second.pagination,
+          data: [...(first.data ?? []), ...(second.data ?? [])],
+        };
+      }
     }
 
     const items = (json?.data ?? [])
@@ -147,10 +241,15 @@ export class AnimeMetaService {
 
     const malIds = uniqueItems.map((i) => i.malId);
     const cachedDocs = await this.model.find({ malId: { $in: malIds } });
-    const byMalId = new Map<number, any>(cachedDocs.map((d) => [d.malId, d.toJSON()]));
+    const byMalId = new Map<number, any>(
+      cachedDocs.map((d) => [d.malId, d.toJSON()]),
+    );
 
     // Keep Jikan's order for UX.
-    return { items: uniqueItems.map((i) => byMalId.get(i.malId) ?? i), pagination };
+    return {
+      items: uniqueItems.map((i) => byMalId.get(i.malId) ?? i),
+      pagination,
+    };
   }
 
   async getOrFetchByMalId(malId: number) {
@@ -158,7 +257,7 @@ export class AnimeMetaService {
     if (existing) return existing.toJSON();
 
     const baseUrl = this.jikanBaseUrl();
-    const url = `${baseUrl}/anime/${encodeURIComponent(String(malId))}`;
+    const url = `${baseUrl}/anime/${encodeURIComponent(String(malId))}?sfw=true`;
 
     let res: Response;
     try {
@@ -166,30 +265,50 @@ export class AnimeMetaService {
         headers: { accept: 'application/json' },
       });
     } catch (e: any) {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', `Failed to reach Jikan API: ${e?.message ?? e}`);
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        `Failed to reach Jikan API: ${e?.message ?? e}`,
+      );
     }
 
     if (res.status === 429) {
       const retryAfter = res.headers.get('retry-after');
       const hint = retryAfter ? ` (retry-after=${retryAfter}s)` : '';
-      throw new ApiErrorException(429, 'UPSTREAM_RATE_LIMIT', `Jikan rate limit exceeded${hint}`);
+      throw new ApiErrorException(
+        429,
+        'UPSTREAM_RATE_LIMIT',
+        `Jikan rate limit exceeded${hint}`,
+      );
     }
 
     if (!res.ok) {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', `Jikan API returned HTTP ${res.status}`);
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        `Jikan API returned HTTP ${res.status}`,
+      );
     }
 
     let json: JikanAnimeResponse;
     try {
       json = (await res.json()) as JikanAnimeResponse;
     } catch {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', 'Jikan API returned invalid JSON');
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        'Jikan API returned invalid JSON',
+      );
     }
 
     const data = json?.data;
     const title = (data?.title ?? '').trim();
     if (!title) {
-      throw new ApiErrorException(502, 'UPSTREAM_ERROR', 'Jikan API response missing title');
+      throw new ApiErrorException(
+        502,
+        'UPSTREAM_ERROR',
+        'Jikan API response missing title',
+      );
     }
 
     const totalEpisodes = data?.episodes ?? undefined;
@@ -207,4 +326,3 @@ export class AnimeMetaService {
     return created.toJSON();
   }
 }
-

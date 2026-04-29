@@ -35,7 +35,11 @@ describe('NestJS backend smoke (e2e)', () => {
       .overrideProvider(AnimeMetaService)
       .useValue({
         findByMalIds: async (malIds: number[]) =>
-          malIds.map((malId) => ({ malId, title: `mock-title-${malId}`, imageUrl: 'https://example.com/x.jpg' })),
+          malIds.map((malId) => ({
+            malId,
+            title: `mock-title-${malId}`,
+            imageUrl: 'https://example.com/x.jpg',
+          })),
         getOrFetchByMalId: async (malId: number) => ({
           malId,
           title: `mock-title-${malId}`,
@@ -88,7 +92,9 @@ describe('NestJS backend smoke (e2e)', () => {
       .send({ malId: 999000, status: 'COMPLETED' })
       .expect(201);
 
-    const res = await request(app.getHttpServer()).get('/api/stats/heatmap').expect(200);
+    const res = await request(app.getHttpServer())
+      .get('/api/stats/heatmap')
+      .expect(200);
 
     expect(res.body).toHaveProperty('from');
     expect(res.body).toHaveProperty('to');
@@ -147,9 +153,10 @@ describe('NestJS backend smoke (e2e)', () => {
 
     await request(app.getHttpServer()).delete(`/api/anime/${id}`).expect(204);
 
-    const after = await request(app.getHttpServer()).get(`/api/anime/${id}`).expect(404);
+    const after = await request(app.getHttpServer())
+      .get(`/api/anime/${id}`)
+      .expect(404);
     expectErrorEnvelope(after.body);
     expect(after.body.error.code).toBe('NOT_FOUND');
   });
 });
-

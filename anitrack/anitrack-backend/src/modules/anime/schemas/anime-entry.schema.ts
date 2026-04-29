@@ -54,4 +54,3 @@ export const AnimeEntrySchema = SchemaFactory.createForClass(AnimeEntry);
 AnimeEntrySchema.index({ userId: 1, malId: 1 }, { unique: true });
 AnimeEntrySchema.index({ userId: 1, status: 1, updatedAt: -1 });
 AnimeEntrySchema.index({ completedDates: 1 });
-

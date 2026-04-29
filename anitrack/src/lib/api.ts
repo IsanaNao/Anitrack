@@ -196,18 +196,30 @@ export async function deleteAnimeEntry(id: string): Promise<void> {
   await fetcher<void>(`/anime/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export type HeatmapDayCount = { date: string; count: number };
+export type LifeMonthCell = {
+  month: string; // YYYY-MM
+  addedCount: number;
+  completedCount: number;
+  episodeCount: number;
+  intensity: number; // 0-4
+};
+
+export type LifeMonthHeatmapResponse = {
+  start: string; // YYYY-MM
+  end: string; // YYYY-MM
+  months: LifeMonthCell[];
+};
 
 export async function getHeatmap(params?: {
-  from?: string;
-  to?: string;
+  start?: string; // YYYY-MM
+  end?: string; // YYYY-MM
   tz?: string;
-}): Promise<HeatmapDayCount[]> {
+}): Promise<LifeMonthHeatmapResponse> {
   const qs = new URLSearchParams();
-  if (params?.from) qs.set("from", params.from);
-  if (params?.to) qs.set("to", params.to);
+  if (params?.start) qs.set("start", params.start);
+  if (params?.end) qs.set("end", params.end);
   if (params?.tz) qs.set("tz", params.tz);
   const suffix = qs.size ? `?${qs.toString()}` : "";
-  return fetcher<HeatmapDayCount[]>(`/stats/heatmap${suffix}`);
+  return fetcher<LifeMonthHeatmapResponse>(`/stats/heatmap${suffix}`);
 }
 

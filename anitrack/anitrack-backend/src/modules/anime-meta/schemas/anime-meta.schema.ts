@@ -42,4 +42,3 @@ export class AnimeMeta {
 }
 
 export const AnimeMetaSchema = SchemaFactory.createForClass(AnimeMeta);
-

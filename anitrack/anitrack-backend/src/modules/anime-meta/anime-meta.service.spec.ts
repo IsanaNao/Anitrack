@@ -25,7 +25,9 @@ describe('AnimeMetaService (cache-aside)', () => {
         { provide: getModelToken(AnimeMeta.name), useValue: model },
         {
           provide: ConfigService,
-          useValue: { get: jest.fn().mockReturnValue('https://api.jikan.moe/v4') },
+          useValue: {
+            get: jest.fn().mockReturnValue('https://api.jikan.moe/v4'),
+          },
         },
       ],
     }).compile();
@@ -40,7 +42,13 @@ describe('AnimeMetaService (cache-aside)', () => {
   });
 
   it('当 AnimeMeta 已存在时：不触发 Jikan 调用', async () => {
-    const existing = { malId, title: 'Frieren', imageUrl: 'x', episodes: 28, score: 9.1 };
+    const existing = {
+      malId,
+      title: 'Frieren',
+      imageUrl: 'x',
+      episodes: 28,
+      score: 9.1,
+    };
     model.findOne.mockResolvedValue({
       toJSON: () => existing,
     });
@@ -103,4 +111,3 @@ describe('AnimeMetaService (cache-aside)', () => {
     expect(got).toMatchObject({ malId, title: 'Frieren' });
   });
 });
-

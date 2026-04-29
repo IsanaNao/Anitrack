@@ -185,16 +185,31 @@ async function checkPageSizeClamp(spec, origin) {
  */
 async function checkListAndItemShape(spec, origin) {
   const errors = [];
-  // Use a stable MAL id that exists in Jikan, because backend now fetches AnimeMeta on create.
-  const malId = 5114;
+  // Use a randomized MAL id to avoid 409 due to leftover rows from prior runs.
+  // The backend supports soft meta fetching, so the MAL id doesn't need to exist in Jikan for the contract test.
+  function randomMalId() {
+    // Large range to avoid collisions with user data and previous runs.
+    return 9_200_000_000 + Math.floor(Math.random() * 10_000);
+  }
 
   const createUrl = `${origin}/api/anime`;
-  const created = await request("POST", createUrl, {
-    jsonBody: {
-      malId,
-      status: "PLANNED",
-    },
-  });
+  let created = null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const malId = randomMalId();
+    const r = await request("POST", createUrl, {
+      jsonBody: {
+        malId,
+        status: "PLANNED",
+      },
+    });
+    if (r.res.status === 409) continue;
+    created = r;
+    break;
+  }
+  if (!created) {
+    errors.push("POST 创建失败: 连续 10 次碰到 409（疑似数据库被污染或 userId 固定导致冲突）");
+    return { errors, id: null };
+  }
 
   if (created.res.status !== 201) {
     errors.push(`POST 创建失败: HTTP ${created.res.status} body=${created.raw?.slice(0, 500)}`);

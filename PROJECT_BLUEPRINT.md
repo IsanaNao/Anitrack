@@ -44,10 +44,17 @@
   - 显示标题、封面、播出信息、外链
 
 ### 1.3 Anime Heatmap（Highlight：绿墙）
-基于用户“已看过”的时间数据，生成类似 GitHub contributions 的观看活跃度热力图。
+基于用户追番行为，生成类似 GitHub contributions 的“人生纸格”（按月）。
 
-- **输入数据**：用户完成番剧的日期（可扩展到“看完一集”的日期）
-- **输出数据**：按周聚合、每天一个强度值（0-4）
+- **坐标系**：纵轴 = 月份（Jan–Dec），横轴 = 年份（从起始年到当前年）
+- **输入信号（后端聚合）**：
+  - `addedCount`：当月加入清单的条目数（按 `createdAt` 月份）
+  - `completedCount`：当月看完的条目数（按 `completedAt` 月份，`status=COMPLETED`）
+  - `episodeCount`：当月累计观看集数（按 `completedAt` 月份累加 `episodesWatched`）
+- **输出结构**：`months[]`（每月一个格子），包含 `intensity`（0–4）
+- **交互（前端）**：
+  - 悬停：GitHub 风格浮动 Tooltip（`pointer-events: none`，避免 hover 干扰）
+  - 点击：锁定月份，在热力图下方展示 “Activity for YYYY-MM”（Added/Completed 时间轴列表）
 
 ### 1.4 Data Persistence（MongoDB）
 使用 MongoDB 存储用户与个性化 watchlist、以及 heatmap 统计所需的日期维度数据。
@@ -231,39 +238,38 @@
 ---
 
 ### 3.7 `GET /api/stats/heatmap`
-返回 heatmap 数据（用于前端渲染绿墙）。
+返回 heatmap 数据（现行：人生纸格“按月”）。
 
 #### Query（建议）
-- `from`（可选）：`YYYY-MM-DD`，默认：过去 365 天
-- `to`（可选）：`YYYY-MM-DD`，默认：今天
-- `tz`（可选）：时区标识（或简化为 offset），默认 `Europe/Berlin`（课程背景）
+- `start`（可选）：`YYYY-MM`，默认：过去 12 个月
+- `end`（可选）：`YYYY-MM`，默认：本月
+- `tz`（可选）：IANA 时区标识（现阶段仅做校验；聚合按 UTC 月份计算）
 
-#### 200 Response（按周聚合）
+#### 200 Response（按月聚合）
 
 ```json
 {
-  "from": "2025-04-20",
-  "to": "2026-04-20",
-  "weeks": [
+  "start": "2005-05",
+  "end": "2006-04",
+  "months": [
     {
-      "weekStart": "2026-04-13",
-      "days": [
-        { "date": "2026-04-13", "intensity": 0, "count": 0 },
-        { "date": "2026-04-14", "intensity": 1, "count": 1 },
-        { "date": "2026-04-15", "intensity": 0, "count": 0 },
-        { "date": "2026-04-16", "intensity": 2, "count": 2 },
-        { "date": "2026-04-17", "intensity": 0, "count": 0 },
-        { "date": "2026-04-18", "intensity": 4, "count": 5 },
-        { "date": "2026-04-19", "intensity": 0, "count": 0 }
-      ]
+      "month": "2005-05",
+      "addedCount": 5,
+      "completedCount": 2,
+      "episodeCount": 48,
+      "intensity": 3
     }
   ]
 }
 ```
 
 #### 强度等级（0-4，后端定义）
-- `count=0` → `intensity=0`
-- 其余按阈值映射到 1-4（阈值策略见第 5 章）
+- `intensity=0` 表示该月无活动
+- 其余按阈值映射到 1-4（阈值策略见第 5 章；当前可用 `addedCount+completedCount` 做权重）
+
+> 备注：旧版“按天绿墙（weeks→days，from/to）”属于历史实现/测试遗留，不再作为主 UI 的契约目标。
+> 兼容策略：前端 `anitrack/src/app/api/stats/heatmap/route.ts` 已改为 **代理到 NestJS**（`http://localhost:3001/api/stats/heatmap`），全仓对外语义以 NestJS 为准。
+> 前端 Activity 列表筛选口径：使用 `dayjs.utc(...).format('YYYY-MM')` 统一与后端 UTC 月聚合，避免时区跨月导致的“统计有数据但列表为空”。
 
 ---
 
@@ -353,7 +359,7 @@
 - `notes`：string（可选）
 - `startedAt`：string(`YYYY-MM-DD`)（可选）
 - `completedAt`：string(`YYYY-MM-DD`)（可选）
-- `completedDates`：string[](`YYYY-MM-DD`)（**为 heatmap 关键**）
+- `completedDates`：string[](`YYYY-MM-DD`)（用于记录“完成日期轨迹”，也可作为历史的按天统计信号；现行月聚合主要使用 `completedAt`）
 - `createdAt` / `updatedAt`
 
 > **Ownership 约束**：`AnimeEntry` 中禁止出现 `title/imageUrl/score/episodes` 等番剧客观信息；这些字段必须属于 `AnimeMeta`。
@@ -425,9 +431,11 @@
 
 后端必须负责：
 - 读取 `AnimeEntry` 中 `status=COMPLETED` 的条目
-- 提取 `completedDates`（日期数组），做“按天计数”
-- 将日期范围切成“按周聚合”的输出结构（weeks → days）
-- 将 `count` 映射到 `intensity` 0-4（纯函数，便于单测）
+- 提取与聚合信号（现行）：
+  - `addedCount`：按 `createdAt` 所在月份计数
+  - `completedCount`：按 `completedAt` 所在月份计数（`status=COMPLETED`）
+  - `episodeCount`：按 `completedAt` 所在月份累加 `episodesWatched`
+- （现行）按月聚合为“人生纸格（月）”：返回 `months[]`，每个月包含 `addedCount/completedCount/episodeCount/intensity`
 
 #### 建议的强度阈值策略（可调整）
 为了适配不同用户数据量，建议使用“固定阈值 + 上限截断”的简单可解释策略：
@@ -449,27 +457,26 @@
 
 ### 6.1 集成测试（Integration Tests）：`/api/stats/heatmap`
 
-#### Case A：空数据
-- **Given**：数据库中没有 `status=COMPLETED` 的条目（或 `completedDates` 为空）
-- **When**：请求 `GET /api/stats/heatmap?from=2026-04-01&to=2026-04-07`
+#### Case A：空数据（按月）
+- **Given**：用户无条目（或无 completed/episodes 贡献）
+- **When**：请求 `GET /api/stats/heatmap?start=2026-01&end=2026-03`
 - **Then**：
   - 状态码 **200**
-  - 返回包含 `from/to/weeks`
-  - `weeks[].days[]` 覆盖范围内所有日期
-  - 每天 `count=0` 且 `intensity=0`
+  - 返回包含 `start/end/months`
+  - `months` 覆盖范围内每个月（包含 2026-01/02/03）
+  - 每个月 `addedCount/completedCount/episodeCount` 为 0，`intensity=0`
 
-#### Case B：多数据（同一天多次）
+#### Case B：多数据（按月聚合）
 - **Given**：
-  - 两个已完成条目，`completedDates` 包含同一天（例如 `2026-04-05`）
-  - 另一个日期也有 1 次完成
-- **When**：请求相同范围
+  - 多条条目分布在不同月份，且 `COMPLETED` 的条目带 `completedAt` 与 `episodesWatched`
+- **When**：请求覆盖这些月份的范围
 - **Then**：
   - 状态码 **200**
-  - `2026-04-05` 的 `count` 等于完成次数总和
-  - `intensity` 按阈值映射正确（例如 `count=2 → intensity=2`）
+  - 对应月份的 `completedCount` 与 `episodeCount` 聚合正确
+  - `intensity` 按阈值映射正确（基于 `addedCount+completedCount` 的权重）
 
 #### Case C：参数校验（可选但加分）
-- **Given**：`from > to` 或日期格式错误
+- **Given**：`start > end` 或月份格式错误
 - **When**：请求 heatmap
 - **Then**：状态码 **400**，错误结构符合通用错误体
 
@@ -593,7 +600,7 @@
 - 初版 OpenAPI（最少覆盖 anime 与 heatmap）
 
 ### 阶段 2（逻辑与测试）— **已完成（仓库现状）**
-> 在后端实现 `/api/stats/heatmap`：对 **`status=COMPLETED`** 的 **`completedDates`** 执行 **Aggregation Pipeline**（含 **`$unwind`** 与 BSON 类型 **Normalization**），按周输出 **`weeks → days`**，强度 **0–4**。配套 **Vitest** 纯函数单测、**integration test**（真实 Mongo）、**Contract Testing** 与播种脚本。
+> 现行后端实现 `/api/stats/heatmap`：以“月份”为单位聚合（人生纸格），输出 `{ start,end,months[] }`；同时保留旧实现/测试的历史记录仅供回顾。
 
 **交付物清单（已对齐）**
 - heatmap 聚合逻辑（纯函数 + Pipeline；**`Date`/`string` 混存修复**）
@@ -611,7 +618,7 @@
 - [x] 原型页闭环：搜索 → 添加（`POST /api/anime { malId }`）→ 刷新我的清单（`GET /api/anime`）
 - [x] 桌面端成品化样式（原型页）：我的清单 4 列卡片网格、封面占位、状态配色 badge、搜索结果紧凑卡片
 - [x] 拆分真实页面与组件（`/` Dashboard、`/library`、`/profile`），并完成 Watchlist 编辑/删除/状态迁移（Dialog）
-- [x] Heatmap：Profile 页已接入 `react-calendar-heatmap`（空数据保护）；后端 heatmap 输出调整为 `[{ date, count }]`
+- [x] Heatmap：Profile 页从“过去一年日历格”升级为“人生纸格（月）”（每行 12 个月）；后端 heatmap 输出升级为 `{ start,end,months[] }`（added/completed/episodes + intensity）
 - [ ] Seasonal Schedule 页面（阶段 6 可选）
 
 ---
@@ -636,7 +643,7 @@
   - 支持 sort 白名单（`updatedAt/createdAt/rating`）。
   - **状态机**：非法迁移 **409**，`error.code` 为 **`INVALID_STATUS_TRANSITION`**。
   - **`COMPLETED` 副作用**：`completedDates` 自动维护为 **`YYYY-MM-DD`**；`DELETE` **204**。
-- **`GET /api/stats/heatmap`**：输出已演进为扁平结构 `[{ date, count }]`（按 `userId` 聚合 `completedAt`），前端可直接喂给 `react-calendar-heatmap`；参数校验（`tz/from/to`）保持。
+- **`GET /api/stats/heatmap`**：现行输出为 `{ start,end,months[] }`（按 `userId` 聚合：added=`createdAt`；completed/episodes=`completedAt + episodesWatched`），用于“人生纸格（月）”；支持 `start/end=YYYY-MM`。
 - **OpenAPI / Swagger UI**：`http://localhost:3000/swagger.json` + **`http://localhost:3000/api-docs`**（`swagger-ui-dist`）已可用，**Try it out** 同源测 API。
 - **Contract Testing**：**AJV**（OpenAPI 3.0 元模式）+ **SwaggerParser** + HTTP 冒烟；严格模式下 **全绿**，与实现 **契约一致**。
 - **Vitest**：`heatmapCalc` 单测 + heatmap **integration test**（真实 Mongo，插入 **COMPLETED** 后断言 **count > 0**）。

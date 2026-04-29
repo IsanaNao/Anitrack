@@ -2,7 +2,6 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
-import { TEMP_USER_ID } from '../../shared/auth/temp-user';
 import {
   assertAllowedStatusTransition,
   type AnimeStatus,
@@ -23,6 +22,17 @@ export class AnimeService implements OnModuleInit {
     private readonly animeMeta: AnimeMetaService,
   ) {}
 
+  private async getMetaSoft(malId: number) {
+    try {
+      return await this.animeMeta.getOrFetchByMalId(malId);
+    } catch (e: any) {
+      // Soft mode: do not fail the request if upstream/meta cache fails.
+      // eslint-disable-next-line no-console
+      console.error('[anitrack-backend] AnimeMeta fetch failed (soft mode):', e?.message ?? e);
+      return null;
+    }
+  }
+
   async onModuleInit() {
     // IMPORTANT: old Atlas unique indexes (e.g. { malId: 1 } unique) can block inserts after refactor.
     // Keeping syncIndexes here makes the new compound unique index authoritative.
@@ -35,17 +45,20 @@ export class AnimeService implements OnModuleInit {
     }
   }
 
-  async list(query: AnimeListQueryDto) {
+  async list(userId: string, query: AnimeListQueryDto) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(query.pageSize ?? 20) || 20));
     const sortParam = query.sort ?? 'updatedAt:desc';
 
     const filter: Record<string, unknown> = {};
-    filter.userId = TEMP_USER_ID;
+    filter.userId = userId;
     if (query.status) filter.status = query.status;
 
     const [sortFieldRaw, sortDirRaw] = String(sortParam).split(':');
-    const sortField = sortFieldRaw === 'updatedAt' ? 'updatedAt' : 'updatedAt';
+    const sortField =
+      sortFieldRaw === 'updatedAt' || sortFieldRaw === 'createdAt' || sortFieldRaw === 'rating'
+        ? sortFieldRaw
+        : 'updatedAt';
     const sortDir = sortDirRaw === 'asc' ? 1 : -1;
 
     const total = await this.model.countDocuments(filter);
@@ -68,11 +81,12 @@ export class AnimeService implements OnModuleInit {
       page,
       pageSize,
       total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     };
   }
 
-  async create(dto: AnimeEntryCreateDto) {
-    await this.animeMeta.getOrFetchByMalId(dto.malId);
+  async create(userId: string, dto: AnimeEntryCreateDto) {
+    const meta = await this.getMetaSoft(dto.malId);
     const status = (dto.status ?? 'PLANNED') as AnimeStatus;
 
     if (status !== 'COMPLETED') {
@@ -102,13 +116,13 @@ export class AnimeService implements OnModuleInit {
     try {
       const created = await this.model.create({
         ...dto,
-        userId: TEMP_USER_ID,
+        userId,
         status,
         completedAt,
         completedDates,
       });
       const json = created.toJSON() as any;
-      json.animeMeta = await this.animeMeta.getOrFetchByMalId(dto.malId);
+      json.animeMeta = meta;
       return json;
     } catch (e: any) {
       if (e?.code === 11000) {
@@ -120,23 +134,28 @@ export class AnimeService implements OnModuleInit {
     }
   }
 
-  async getById(id: string) {
+  async getById(userId: string, id: string) {
     if (!isValidObjectId(id)) {
       throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     }
-    const doc = await this.model.findOne({ _id: id, userId: TEMP_USER_ID });
+    const doc = await this.model.findOne({ _id: id, userId });
     if (!doc) throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     const json = doc.toJSON() as any;
-    json.animeMeta = await this.animeMeta.getOrFetchByMalId(doc.malId);
+    json.animeMeta = await this.getMetaSoft(doc.malId);
     return json;
   }
 
-  async patchById(id: string, dto: AnimeEntryPatchDto, rawBody: Record<string, unknown>) {
+  async patchById(
+    userId: string,
+    id: string,
+    dto: AnimeEntryPatchDto,
+    rawBody: Record<string, unknown>,
+  ) {
     if (!isValidObjectId(id)) {
       throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     }
 
-    const existing = await this.model.findOne({ _id: id, userId: TEMP_USER_ID });
+    const existing = await this.model.findOne({ _id: id, userId });
     if (!existing) throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
 
     const fromStatus = existing.status as AnimeStatus;
@@ -174,7 +193,8 @@ export class AnimeService implements OnModuleInit {
     const update: Record<string, unknown> = { ...dto };
 
     if (dto.malId != null && dto.malId !== existing.malId) {
-      await this.animeMeta.getOrFetchByMalId(dto.malId);
+      // Soft mode: allow updating malId even if upstream/meta cache fails.
+      await this.getMetaSoft(dto.malId);
     }
 
     if (toStatus === 'COMPLETED') {
@@ -196,19 +216,19 @@ export class AnimeService implements OnModuleInit {
       update.completedDates = [];
     }
 
-    const updated = await this.model.findOneAndUpdate({ _id: id, userId: TEMP_USER_ID }, update, {
+    const updated = await this.model.findOneAndUpdate({ _id: id, userId }, update, {
       new: true,
       runValidators: true,
     });
     if (!updated) throw new ApiErrorException(404, 'NOT_FOUND', 'Anime entry not found');
     const json = updated.toJSON() as any;
-    json.animeMeta = await this.animeMeta.getOrFetchByMalId(updated.malId);
+    json.animeMeta = await this.getMetaSoft(updated.malId);
     return json;
   }
 
-  async deleteById(id: string) {
+  async deleteById(userId: string, id: string) {
     if (!isValidObjectId(id)) return;
-    await this.model.findOneAndDelete({ _id: id, userId: TEMP_USER_ID });
+    await this.model.findOneAndDelete({ _id: id, userId });
   }
 }
 

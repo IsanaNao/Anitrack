@@ -29,6 +29,12 @@ export class AnimeEntryCreateDto {
   rating?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  episodesWatched?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(5000)
   notes?: string;
@@ -73,6 +79,12 @@ export class AnimeEntryPatchDto {
   rating?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  episodesWatched?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(5000)
   notes?: string;
@@ -113,6 +125,7 @@ export class AnimeListQueryDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(100)
   pageSize?: number;
 
   @IsOptional()

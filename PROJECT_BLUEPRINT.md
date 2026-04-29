@@ -280,6 +280,21 @@
 
 > **实现状态**：已在 NestJS 后端落地为双表结构：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）。创建条目时采用 **Cache-Aside**：先查/写 `AnimeMeta`，再写 `AnimeEntry`，并在返回体中嵌套 `animeMeta`。
 
+#### 3.8.1 Jikan 搜索中转（Search → Upsert → Return）
+为避免前端直连外部 API，新增后端中转接口：
+- `GET /api/anime-meta/search?q=...`：
+  - 上游：`GET https://api.jikan.moe/v4/anime?q={q}&limit=5`
+  - 处理：对结果按 `malId` **bulk upsert** 写入 `AnimeMeta`（去重、保持顺序）
+  - 返回：规范化后的 `AnimeMeta[]`（含 `id`；不暴露 `_id/__v`）
+
+#### 3.8.2 429 Rate Limit 策略
+- 当上游返回 429：后端以 **HTTP 429** 透传语义，并使用错误码 `UPSTREAM_RATE_LIMIT`（前端提示稍后重试）。
+
+#### 3.8.3 “柔性模式”（Soft Mode）
+考虑到 Jikan 的可用性与限流波动，`POST /api/anime` 支持柔性创建：
+- 若抓取/读取 `AnimeMeta` 失败：记录错误日志但 **不阻断** `AnimeEntry` 创建
+- 此时响应体中的 `animeMeta` 为 `null`
+
 ---
 
 ### 3.9 多用户扩展性备忘（未来迁移至个人博客）
@@ -334,6 +349,7 @@
 - `malId`：number（来自 Jikan / MyAnimeList）
 - `status`：enum
 - `rating`：number（可选）
+- `episodesWatched`：number（可选；用于“已看 x / 全 y 集”的进度管理）
 - `notes`：string（可选）
 - `startedAt`：string(`YYYY-MM-DD`)（可选）
 - `completedAt`：string(`YYYY-MM-DD`)（可选）
@@ -359,7 +375,10 @@
 - `title`：string
 - `imageUrl`：string（可选）
 - `episodes`：number（可选）
+- `totalEpisodes`：number（可选；优先使用，`episodes` 为历史兼容字段）
 - `score`：number（可选）
+- `synopsis`：string（可选；可能较长）
+- `genres`：string[]（可选；从 Jikan genres 对象数组规范化为字符串数组，便于前端 Tag 渲染）
 - `createdAt` / `updatedAt`
 
 #### 关系
@@ -465,6 +484,66 @@
 
 ---
 
+## 6.3 测试导航（Troubleshooting Toolbox）
+
+> 目的：当“前后端联调/数据库/契约/第三方 API”出问题时，**知道先跑哪个测试、在哪里看结果、怎么定位问题**。
+
+### 6.3.1 快速排障顺序（推荐）
+
+- **API 是否活着（最基础）**：后端 Swagger 能打开？
+  - `http://localhost:3001/api-docs`
+  - `http://localhost:3001/swagger.json`
+- **后端自检（不依赖外部 Jikan）**：跑 NestJS 的 e2e/smoke（会 mock `AnimeMetaService`，且可用内存 Mongo）
+  - 适合定位：错误信封、状态机、heatmap 结构、CRUD 基础链路
+- **前端侧算法/集成（Next.js 旧 route handler 时代遗留）**：Vitest（heatmapCalc 单测 + heatmap integration）
+  - 适合定位：heatmap 纯函数与 swagger 结构对齐、Mongo 连接/清理逻辑
+- **契约回归（Swagger vs 运行时）**：`anitrack-tester/contract-validator`
+  - 适合定位：路径缺失/字段不一致/错误码与信封不一致/分页结构偏差
+- **端到端冒烟（HTTP 层）**：`anitrack-tester/api-test-suite/run-all.js`
+  - 适合定位：创建→更新→冲突→完成日期副作用→删除的“真实 HTTP 闭环”
+
+### 6.3.2 后端测试（NestJS / Jest）
+
+目录：`anitrack/anitrack-backend/`
+
+- **单元/集成（Jest）**
+  - `npm test`
+- **e2e 与 smoke**
+  - `test/app.e2e-spec.ts`：最小 e2e（`GET /api`）
+  - `test/app.smoke-spec.ts`：覆盖 heatmap、状态机、CRUD（mock `AnimeMetaService`；无 `MONGODB_URI` 时启用 `mongodb-memory-server`）
+
+### 6.3.3 前端测试（Next.js / Vitest）
+
+目录：`anitrack/`
+
+- **单测**：`npm test`
+  - 例：`src/lib/__tests__/heatmap-calc.test.ts`（强度映射、周结构）
+- **集成测试**：`npm run test:integration`
+  - 例：`src/__tests__/integration/heatmap.integration.test.ts`
+  - 说明：需要真实 `MONGODB_URI`（从 `anitrack/.env.local` 由 `vitest.integration.config.ts` 自动加载）
+
+### 6.3.4 契约测试（Contract Validator）
+
+目录：`anitrack-tester/contract-validator/`
+
+- **一键运行（结构 + HTTP 冒烟）**：`npm run contract`（或 `node run-contract-test.js`）
+- **环境变量**
+  - `BASE_URL`（默认 `http://localhost:3001/api`，用于推导 `origin`）
+  - `CONTRACT_ORIGIN`（覆盖站点根，如 `http://localhost:3001`）
+  - `CONTRACT_SWAGGER_URL`（覆盖 swagger.json 地址）
+  - `CONTRACT_PENDING_PATHS`（逗号分隔；允许暂未实现路径降级为 warning）
+
+### 6.3.5 HTTP 冒烟脚本（API Test Suite）
+
+目录：`anitrack-tester/api-test-suite/`
+
+- **一键跑通（smoke + batch）**：`node run-all.js`
+- **播种 heatmap 数据**：`node heatmap-seeder.js`
+- **环境变量**
+  - `BASE_URL`（默认 `http://localhost:3000/api`，历史原因；如需直连 NestJS，建议：`http://localhost:3001/api`）
+
+---
+
 ## 7. 响应式 UI 规范（Breakpoints & Layout）
 
 > 目标：手机端可用、桌面端信息密度更高；热力图在窄屏可横向滚动。
@@ -526,11 +605,14 @@
 
 > 构建 Anitrack 的主界面：左侧 / 纵向为追番列表，热力图为 **GitHub-style contributions**；热力图组件根据 API 返回的 **`intensity` 0–4** 渲染色深，窄屏 **`overflow-x-auto`** 横向滚动。
 
-**交付物清单**
-- 主页面布局（响应式）
-- Watchlist 组件（调用 `/api/anime`）
-- Heatmap 组件（调用 `/api/stats/heatmap`）
-- 移动端 heatmap 横向滚动与桌面端并排布局
+**交付物清单（已完成/进行中）**
+- [x] 前端 API 基座：统一 `fetcher`，默认直连 `http://localhost:3001/api`
+- [x] Jikan 搜索中转：`GET /api/anime-meta/search?q=...`（写入 `AnimeMeta`）
+- [x] 原型页闭环：搜索 → 添加（`POST /api/anime { malId }`）→ 刷新我的清单（`GET /api/anime`）
+- [x] 桌面端成品化样式（原型页）：我的清单 4 列卡片网格、封面占位、状态配色 badge、搜索结果紧凑卡片
+- [x] 拆分真实页面与组件（`/` Dashboard、`/library`、`/profile`），并完成 Watchlist 编辑/删除/状态迁移（Dialog）
+- [x] Heatmap：Profile 页已接入 `react-calendar-heatmap`（空数据保护）；后端 heatmap 输出调整为 `[{ date, count }]`
+- [ ] Seasonal Schedule 页面（阶段 6 可选）
 
 ---
 
@@ -542,7 +624,7 @@
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-04-20 更新**）
+## 10. 实施进度快照（与仓库同步，**2026-04-29 更新**）
 
 以下结论基于 **真实请求 + 数据库读写**（`anitrack-tester/api-test-suite/run-all.js`）、**仓库内 Vitest**（`npm test` / `npm run test:integration`），以及 **Contract Testing**（`anitrack-tester/contract-validator/run-contract-test.js`，**严格模式**：`CONTRACT_PENDING_PATHS` 为空）。
 
@@ -550,10 +632,11 @@
 
 - **MongoDB 接入**：`anitrack/.env.local` 中 `MONGODB_URI`（Atlas）；开发与集成测试下连接、**Aggregation Pipeline**、写入均可用。
 - **`/api/anime` 契约与行为**：
-  - CRUD 与分页列表符合第 3 章草案（`items/page/pageSize/total`）。
+  - CRUD 与分页列表符合第 3 章草案，并增强返回 `totalPages`（前端分页器可直接渲染）。
+  - 支持 sort 白名单（`updatedAt/createdAt/rating`）。
   - **状态机**：非法迁移 **409**，`error.code` 为 **`INVALID_STATUS_TRANSITION`**。
   - **`COMPLETED` 副作用**：`completedDates` 自动维护为 **`YYYY-MM-DD`**；`DELETE` **204**。
-- **`GET /api/stats/heatmap`**：已实现；**`$unwind` 后对 `completedDates` 做 Normalization**（`$dateToString` / `$trim`），解决 **BSON `Date` / `string` 混存** 导致的 **count 全 0**；`from`/`to` **闭区间** 与存储字符串对齐；默认 **`tz=Europe/Berlin`**。
+- **`GET /api/stats/heatmap`**：输出已演进为扁平结构 `[{ date, count }]`（按 `userId` 聚合 `completedAt`），前端可直接喂给 `react-calendar-heatmap`；参数校验（`tz/from/to`）保持。
 - **OpenAPI / Swagger UI**：`http://localhost:3000/swagger.json` + **`http://localhost:3000/api-docs`**（`swagger-ui-dist`）已可用，**Try it out** 同源测 API。
 - **Contract Testing**：**AJV**（OpenAPI 3.0 元模式）+ **SwaggerParser** + HTTP 冒烟；严格模式下 **全绿**，与实现 **契约一致**。
 - **Vitest**：`heatmapCalc` 单测 + heatmap **integration test**（真实 Mongo，插入 **COMPLETED** 后断言 **count > 0**）。
@@ -561,8 +644,8 @@
 
 ### 10.2 下一阶段焦点（阶段 3）
 
-- **Jikan**：后端 **API 代理**（及 §3.8 **`AnimeMeta` Cache-Aside** 的渐进落地）。
-- **前端**：Tailwind 主布局、Watchlist、热力图绿墙、Seasonal；`src/app/page.tsx` 仍为脚手架首页，待替换为业务壳。
+- **Jikan**：`GET /api/anime-meta/search` 支持分页（`page/pageSize`），并返回 Jikan `pagination`；搜索结果 bulk upsert 写入 `AnimeMeta`（含 `synopsis/genres/totalEpisodes`）。
+- **前端**：完成多页面路由与深交互（debounce 搜索 + 分页；Library 全局单实例 Dialog 编辑/删除；Profile 绿墙与统计）。
 
 ### 10.3 实现侧备忘（避免重复踩坑）
 
@@ -570,4 +653,11 @@
 - **热力图 Aggregation**：任何涉及 **日历字符串** 与 **BSON `Date`** 的 **Normalization** 必须在 **`$group` 之前**完成，且 **`$match` 闭区间** 作用于 **同一规范化字段**，否则易出现 **静默空结果**。
 - 防止启动打架**Set-Location "C:\Users\HP\Desktop\my_page"; npm run dev**
 - 页面 /：http://localhost:3000/（主页面），http://localhost:3000/api-docs#/（Swagger UI）
+
+### 10.4 阶段 4–5 里程碑（2026-04-29）
+
+- **多页面架构**：Next.js App Router 拆分为 `/`（Dashboard）、`/library`（管理）、`/profile`（用户中心），并抽出 `TopNav/AppShell/AnimeCard/Pagination` 等公共组件
+- **搜索体验进化**：Jikan 搜索分页（后端透传 + 前端分页器），输入 debounce(500ms) 自动搜索，Enter 立即触发并回到第 1 页
+- **深度管理**：Library 采用“单全局 Dialog”展示详情与编辑（`status/rating/episodesWatched`），并通过 React Query `invalidateQueries(["anime"])` 实现跨页面同步
+- **Meta 丰富化**：`AnimeMeta` 追加 `synopsis/genres(string[])/totalEpisodes`，前端 Tag 渲染限制展示数量（默认 3 个）避免溢出
 

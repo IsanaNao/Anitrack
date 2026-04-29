@@ -7,11 +7,11 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：**阶段 3 启动**（Jikan 搜索/读取集成 + 前端对接 NestJS API）
-- **正在做**：建立前后端通信基准（前端统一 API 封装 → 直连 `http://localhost:3001/api`）
-- **下一步**：Jikan 搜索接口（后端/代理）→ 前端搜索 UI 对接 → Watchlist / Heatmap / Seasonal
-- **阻塞/风险**：阶段 4 引入 Auth 前，`userId` 暂用 `TEMP_USER_ID`（技术债，见下）
-- **最后更新时间**：2026-04-22
+- **当前阶段**：**阶段 5 已完成（里程碑）**：多页面架构 + 深度交互（搜索分页、编辑弹窗、Profile 热图）
+- **正在做**：进入“收口与打磨”（契约/文档同步、UI polish、可选：Seasonal Schedule 与 Auth）
+- **下一步**：补齐（可选）Seasonal Schedule；完善契约/测试；评估是否接入 Auth（将 CurrentUser 从 dev fallback 升级为真实 user）
+- **阻塞/风险**：Auth 未接入前，`CurrentUser` 仍会回退到 `TEMP_USER_ID`（技术债，见下）
+- **最后更新时间**：2026-04-29
 
 ---
 
@@ -19,7 +19,9 @@
 
 - [x] **阶段 1（后端基座）**：Next.js App Router API + MongoDB + `/api/anime` CRUD + **OpenAPI / Swagger UI** + **Contract Testing**（`anitrack-tester/contract-validator`）
 - [x] **阶段 2（后端重构与测试）**：**100% Completed**（NestJS 平移 + 双表 Ownership 拆分 + heatmap 测试/契约对齐）
-- [ ] **阶段 3（Jikan 搜索集成 & 前端对接）**：建立前端 API 基座 → 接入 Jikan 搜索/读取 → 前端联调
+- [x] **阶段 3（Jikan 搜索集成 & 前端对接）**：建立前端 API 基座 → 接入 Jikan 搜索/读取 → 前端联调（闭环跑通）
+- [x] **阶段 4（架构重构与页面扩展）**：多页面路由 `/`、`/library`、`/profile` + 公用组件拆分 + 后端分页/CurrentUser 抽象
+- [x] **阶段 5（深度交互与搜索体验进化）**：Jikan 搜索分页 + debounce + 全局单实例 Dialog 编辑 + Profile 热图与统计卡片
 
 ---
 
@@ -91,11 +93,12 @@
 
 ### 4.1 UI 基础
 - [ ] Tailwind 配置
-- [ ] 主页面布局（移动端纵向、桌面端左右/上下分区）
+- [x] 主页面原型（桌面端优先）：搜索 + 添加 + “我的清单”卡片网格（4 列）
 
 ### 4.2 Watchlist
-- [ ] 列表渲染（按 status 筛选/分组）
-- [ ] CRUD 交互（创建/编辑/删除）
+- [x] 列表渲染（最小版）：`GET /api/anime` 拉取并以卡片网格展示
+- [x] 创建交互（最小版）：从搜索结果 “添加” → `POST /api/anime { malId }`
+- [ ] CRUD 完整交互：编辑/删除/状态迁移 UI（下一步）
 
 ### 4.3 Heatmap（绿墙）
 - [ ] 拉取 `/api/stats/heatmap`
@@ -105,6 +108,12 @@
 ### 4.4 Seasonal Schedule（Jikan）
 - [ ] 获取当前季度 schedule（直连或走后端代理）
 - [ ] 移动端分组折叠 / 桌面端表格或栅格
+
+### 4.5 Jikan 搜索中转 & 自动化入库（本次会话新增）
+- [x] `GET /api/anime-meta/search?q=...`：后端调用 Jikan V4 Search（limit=5）
+- [x] 搜索结果写入 `AnimeMeta`：bulk upsert（按 `malId` 唯一键），并去重保持顺序
+- [x] 429 限流处理：上游 429 → 后端 429（`UPSTREAM_RATE_LIMIT`）
+- [x] “柔性模式”：`POST /api/anime` 中抓取/读取 `AnimeMeta` 失败不阻断创建，`animeMeta=null` 并记录错误日志
 
 ---
 
@@ -133,12 +142,27 @@
 - **2026-04-20（阶段 2 收口）**：攻克热力图 **MongoDB `Date` / `string` 混合类型** 在 **Aggregation Pipeline** 中与查询边界比较失效的问题（通过 **`$unwind` 后 Normalization** + `$dateToString` 等）；**Vitest** 单测 + 集成测试落地；`heatmap-seeder.js` 与 **Contract Testing**（`anitrack-tester/contract-validator`）在严格模式下与 OpenAPI 契约 **100% 对齐**（运行时冒烟全绿）
 - **2026-04-22（架构平移）**：后端从 Next.js Route Handlers 平移至 **NestJS**（端口 `3001`，全局前缀 `/api`，Swagger UI `/api-docs`）；`/api/anime` CRUD + `/api/stats/heatmap` 聚合逻辑已迁移并保持字段名不变；契约测试默认指向 `3001`（NestJS 作为主 API 供应方）
 - **2026-04-22（Ownership 拆分）**：引入双表：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）；`POST /api/anime` 仅需 `malId`；响应中嵌套 `animeMeta`；`Stats/heatmap` 加入 `TEMP_USER_ID` 过滤；契约测试与 e2e 全绿
+- **2026-04-29（阶段 3 闭环 + UI 原型成品化）**：
+  - 后端新增 `GET /api/anime-meta/search?q=...`：Jikan 搜索中转 + **bulk upsert** 写入 `AnimeMeta`（去重、保持顺序）
+  - 429：上游限流返回 429（`UPSTREAM_RATE_LIMIT`）
+  - `POST /api/anime`：引入“柔性模式”，meta 抓取失败不阻断写入，响应 `animeMeta=null`
+  - 前端：`page.tsx` 原型页完成“搜索→添加→我的清单”闭环，并做桌面端卡片网格布局（4 列）与状态配色 badge
+
+- **2026-04-29（阶段 4–5 里程碑：多页 + 深交互 + Profile）**：
+  - 前端：完成多页面路由 `/`（Dashboard）、`/library`（管理）、`/profile`（用户中心）；抽出 `TopNav/AppShell/AnimeCard/Pagination` 等组件
+  - 后端：`GET /api/anime` 增强分页返回 `totalPages`，并支持 sort 白名单（`updatedAt/createdAt/rating`）
+  - 后端：引入 `@CurrentUser()`（dev fallback 仍为 `TEMP_USER_ID`），清理业务层散落的 userId 读取
+  - 后端：`GET /api/anime-meta/search` 支持 `page/pageSize`，并返回 Jikan `pagination`（完整透传）
+  - 后端：`AnimeMeta` 扩字段 `synopsis/genres(string[])/totalEpisodes`；`AnimeEntry` 新增 `episodesWatched`
+  - 前端：搜索体验升级（debounce 500ms + Enter 立即搜 + 分页器）；搜索结果中已存在条目显示“已在清单”
+  - 前端：Library 采用“全局单实例 Dialog”编辑条目（status/rating/episodesWatched）+ 删除；所有写操作统一 `invalidateQueries(["anime"])`
+  - 前端：`/profile` 使用 `react-calendar-heatmap` 渲染绿墙，并做空数据保护（values=`[]`），增加统计卡片
 
 ---
 
 ## 9. 技术债务（Tech Debt）
 
-- **TEMP_USER_ID**：阶段 3 暂用静态占位符（`default_user`），阶段 4 接入 Auth 后需要替换为从 Token 解析的真实用户 id
+- **TEMP_USER_ID**：仍作为 dev fallback 存在；但已通过 `@CurrentUser()` 装饰器集中收口。接入 Auth 后应把 `CurrentUser` 的来源替换为 token/session 注入的真实 user id
 - **索引迁移风险**：旧集合上可能残留 `{ malId: 1 } unique` 索引会阻止新结构插入  
   - 已在服务启动时调用 `this.animeEntryModel.syncIndexes()`（无 DB 时跳过）  
   - 若 Atlas 上仍异常，建议在网页端 **Drop `animeentries` collection** 后重启，让新索引干净重建
@@ -150,3 +174,31 @@
 - `api-test-suite/heatmap-seeder.js`：约 20 条 COMPLETED 播种（2026-04-11～19 分布），用于热力图联调
 - （把杂七杂八的想法先丢这里，后续再搬运到 Blueprint / 任务清单）
 
+---
+
+## 10. 测试/排障速查（Runbook）
+
+> 目标：项目“哪里坏了”时，快速知道该跑哪一条命令定位问题。
+
+### 10.1 后端（NestJS）测试
+
+目录：`anitrack/anitrack-backend/`
+
+- `npm test`：Jest（包含 e2e/smoke）
+  - `test/app.smoke-spec.ts`：mock `AnimeMetaService` + 可用内存 Mongo（不依赖 Jikan）
+
+### 10.2 前端（Next.js）测试
+
+目录：`anitrack/`
+
+- `npm test`：Vitest 单测（heatmapCalc 等）
+- `npm run test:integration`：Vitest 集成（需要 `MONGODB_URI`，由 `vitest.integration.config.ts` 读取 `anitrack/.env.local`）
+
+### 10.3 契约/HTTP 冒烟工具
+
+目录：`anitrack-tester/`
+
+- `contract-validator/`：`npm run contract`（swagger 结构 + HTTP 契约冒烟；默认指向 NestJS `3001`）
+- `api-test-suite/`：
+  - `node run-all.js`：HTTP smoke + batch（注意 `BASE_URL` 默认 `http://localhost:3000/api`；直连 NestJS 时请改为 `http://localhost:3001/api`）
+  - `node heatmap-seeder.js`：热力图播种（不清库、可重复跑）

@@ -41,8 +41,8 @@ describe('AnimeMetaService (cache-aside)', () => {
 
   it('当 AnimeMeta 已存在时：不触发 Jikan 调用', async () => {
     const existing = { malId, title: 'Frieren', imageUrl: 'x', episodes: 28, score: 9.1 };
-    model.findOne.mockReturnValue({
-      lean: jest.fn().mockResolvedValue(existing),
+    model.findOne.mockResolvedValue({
+      toJSON: () => existing,
     });
 
     const fetchSpy = jest.fn();
@@ -57,9 +57,7 @@ describe('AnimeMetaService (cache-aside)', () => {
   });
 
   it('当 AnimeMeta 不存在时：抓取 Jikan 并写入缓存', async () => {
-    model.findOne.mockReturnValue({
-      lean: jest.fn().mockResolvedValue(null),
-    });
+    model.findOne.mockResolvedValue(null);
 
     const fetchSpy = jest.fn().mockResolvedValue({
       ok: true,
@@ -83,6 +81,7 @@ describe('AnimeMetaService (cache-aside)', () => {
         title: 'Frieren',
         imageUrl: 'https://cdn.example/cover.jpg',
         episodes: 28,
+        totalEpisodes: 28,
         score: 9.1,
       }),
     });
@@ -96,7 +95,10 @@ describe('AnimeMetaService (cache-aside)', () => {
       title: 'Frieren',
       imageUrl: 'https://cdn.example/cover.jpg',
       episodes: 28,
+      totalEpisodes: 28,
       score: 9.1,
+      synopsis: undefined,
+      genres: undefined,
     });
     expect(got).toMatchObject({ malId, title: 'Frieren' });
   });

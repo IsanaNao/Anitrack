@@ -98,8 +98,27 @@ export interface AnimeMeta {
   title: string;
   imageUrl?: string;
   episodes?: number;
+  totalEpisodes?: number;
   score?: number;
+  synopsis?: string;
+  genres?: string[];
 }
+
+export type JikanPagination = {
+  last_visible_page?: number;
+  has_next_page?: boolean;
+  current_page?: number;
+  items?: {
+    count?: number;
+    total?: number;
+    per_page?: number;
+  };
+};
+
+export type AnimeMetaSearchResponse = {
+  items: AnimeMeta[];
+  pagination: JikanPagination;
+};
 
 export interface AnimeEntry {
   id: string;
@@ -107,6 +126,7 @@ export interface AnimeEntry {
   malId: number;
   status: AnimeStatus;
   rating?: number;
+  episodesWatched?: number;
   notes?: string;
   startedAt?: string;
   completedAt?: string;
@@ -121,6 +141,7 @@ export type Paginated<T> = {
   page: number;
   pageSize: number;
   total: number;
+  totalPages: number;
 };
 
 export async function getAnimeEntries(params?: {
@@ -137,5 +158,56 @@ export async function getAnimeEntries(params?: {
 
   const suffix = qs.size ? `?${qs.toString()}` : "";
   return fetcher<Paginated<AnimeEntry>>(`/anime${suffix}`);
+}
+
+export async function searchAnimeMeta(params: {
+  q: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<AnimeMetaSearchResponse> {
+  const qs = new URLSearchParams();
+  qs.set("q", params.q);
+  if (params.page) qs.set("page", String(params.page));
+  if (params.pageSize) qs.set("pageSize", String(params.pageSize));
+  return fetcher<AnimeMetaSearchResponse>(`/anime-meta/search?${qs.toString()}`);
+}
+
+export async function createAnimeEntry(args: {
+  malId: number;
+  status?: AnimeStatus;
+}): Promise<AnimeEntry> {
+  return fetcher<AnimeEntry>(`/anime`, {
+    method: "POST",
+    body: JSON.stringify(args),
+  });
+}
+
+export async function patchAnimeEntry(
+  id: string,
+  patch: Partial<Pick<AnimeEntry, "status" | "rating" | "episodesWatched" | "notes">>,
+): Promise<AnimeEntry> {
+  return fetcher<AnimeEntry>(`/anime/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteAnimeEntry(id: string): Promise<void> {
+  await fetcher<void>(`/anime/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export type HeatmapDayCount = { date: string; count: number };
+
+export async function getHeatmap(params?: {
+  from?: string;
+  to?: string;
+  tz?: string;
+}): Promise<HeatmapDayCount[]> {
+  const qs = new URLSearchParams();
+  if (params?.from) qs.set("from", params.from);
+  if (params?.to) qs.set("to", params.to);
+  if (params?.tz) qs.set("tz", params.tz);
+  const suffix = qs.size ? `?${qs.toString()}` : "";
+  return fetcher<HeatmapDayCount[]>(`/stats/heatmap${suffix}`);
 }
 

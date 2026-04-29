@@ -33,6 +33,9 @@ export class AnimeEntry {
   @Prop({ type: Number, required: false, min: 0, max: 10 })
   rating?: number;
 
+  @Prop({ type: Number, required: false, min: 0 })
+  episodesWatched?: number;
+
   @Prop({ type: String, required: false })
   notes?: string;
 

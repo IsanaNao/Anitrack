@@ -14,6 +14,7 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'INVALID_STATUS_TRANSITION'
   | 'UPSTREAM_ERROR'
+  | 'UPSTREAM_RATE_LIMIT'
   | 'INTERNAL_ERROR';
 
 export type ApiErrorDetail = { path: string; reason: string };

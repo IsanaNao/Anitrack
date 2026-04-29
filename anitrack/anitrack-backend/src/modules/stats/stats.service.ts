@@ -4,11 +4,9 @@ import { Model } from 'mongoose';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
 import {
   addCalendarDaysUTC,
-  buildHeatmapWeeks,
   compareYMD,
   getTodayInTimeZone,
 } from '../../common/utils/heatmap-calc';
-import { TEMP_USER_ID } from '../../shared/auth/temp-user';
 import { AnimeEntry, AnimeEntryDocument } from '../anime/schemas/anime-entry.schema';
 import { HeatmapQueryDto } from './dto/heatmap-query.dto';
 
@@ -16,7 +14,7 @@ import { HeatmapQueryDto } from './dto/heatmap-query.dto';
 export class StatsService {
   constructor(@InjectModel(AnimeEntry.name) private readonly model: Model<AnimeEntryDocument>) {}
 
-  async heatmap(query: HeatmapQueryDto) {
+  async heatmap(userId: string, query: HeatmapQueryDto) {
     const tz = query.tz ?? 'Europe/Berlin';
     try {
       new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -39,17 +37,16 @@ export class StatsService {
     const rows = await this.model.aggregate<{ _id: string; count: number }>([
       {
         $match: {
-          userId: TEMP_USER_ID,
+          userId,
           status: 'COMPLETED',
-          completedDates: { $exists: true, $type: 'array', $ne: [] },
+          completedAt: { $exists: true, $ne: null },
         },
       },
-      { $unwind: { path: '$completedDates' } },
       {
         $addFields: {
           heatmapDay: {
             $let: {
-              vars: { v: '$completedDates' },
+              vars: { v: '$completedAt' },
               in: {
                 $cond: {
                   if: { $eq: [{ $type: '$$v' }, 'date'] },
@@ -78,16 +75,13 @@ export class StatsService {
           count: { $sum: 1 },
         },
       },
+      { $sort: { _id: 1 } },
     ]);
 
-    const counts = new Map<string, number>();
-    for (const r of rows) {
-      const key = typeof r._id === 'string' ? r._id.trim() : String(r._id);
-      counts.set(key, r.count);
-    }
-
-    const weeks = buildHeatmapWeeks(from, to, counts);
-    return { from, to, weeks };
+    return rows.map((r) => ({
+      date: typeof r._id === 'string' ? r._id.trim() : String(r._id),
+      count: r.count,
+    }));
   }
 }
 

@@ -368,19 +368,30 @@ anitrack-backend/src/modules/bee/
 - `data: object`（Jikan 返回全量 JSON）
 - `lastUpdated: Date`
 - `source: 'seasonal' | 'general'`
+- `tier: 'seasonal' | 'top_1y' | 'top_5y' | 'top_all' | 'backfill'`（抓取梯队）
+- `priority: number`（越小优先级越高）
 
 #### 3.9.3 调度节奏（避免 60 秒边界）
 - **每 65 秒**执行一次
 - 每次同步 **3 个**条目（`/anime/{id}`）
 
-#### 3.9.4 优先级策略（seasonal → general）
-1. 启动后（仅当 `SYNC_ENABLED=true`）调用 `/seasons/now` 获取当季 `malId`，写入镜像队列（`source=seasonal`）
-2. Cron 每次优先挑选 seasonal 的“缺失/过期”条目同步
-3. seasonal 没有待更新时再同步 general
+#### 3.9.4 优先级策略（多级梯队）
+按 `priority`（越小越优先）：
+1. `seasonal`（当季，priority=0）
+2. `top_1y`（热门 Top 40，priority=10）
+3. `top_5y`（热门 Top 100，priority=20）
+4. `top_all`（历史热门 Top 200，priority=30）
+5. `backfill`（季度回滚补漏，priority=90，仅当 1-4 全部跑满后才启动）
+
+> 注：Jikan 的 `top` 端点不提供严格的“近 1 年/近 5 年”过滤参数；当前实现采用“分层数量梯度（40/100/200）+ 优先级”来逼近你要的策略。若要严格按年份窗口，可在镜像数据里基于 `aired.from` 做二次分类与重打标签。
 
 #### 3.9.5 数据保鲜（TTL）
-- seasonal：`lastUpdated` 超过 **3 天** → 视为过期
-- general：`lastUpdated` 超过 **30 天** → 视为过期
+按 tier：
+- `seasonal`：7 天
+- `top_1y`（Top40）：30 天
+- `top_5y`（Top100）：60 天
+- `top_all`（Top200）：180 天
+- `backfill`：60 天
 
 #### 3.9.6 读路径适配（Mirror-first）
 `AnimeMetaService.getOrFetchByMalId()`：
@@ -390,6 +401,22 @@ anitrack-backend/src/modules/bee/
 #### 3.9.7 环境变量（开发环境特化）
 - `SYNC_ENABLED=true`：启用 Bee 静默同步与启动 seed
 - `JIKAN_USER_AGENT=...`：可选，覆盖默认 UA（建议写联系邮箱）
+
+#### 3.9.8 断点续爬状态（BeeState）
+为实现“季度回滚补漏”的断点续爬，后端新增 `BeeState`（key-value），用来持久化回滚游标（上一季/年份），重启后从上次位置继续。
+
+#### 3.9.9 Seed 重试（抗 429/网络抖动）
+为避免启动 seed 过程中遇到 429 或网络异常导致“只有部分 tier 被播种”，Cron 会以低频（例如每 30 分钟）重试执行 seed（全部为 upsert + `$setOnInsert`，不会产生重复写入）。
+
+#### 3.9.10 429 限流排障（Runbook）
+当日志出现 `status=429 code=UPSTREAM_RATE_LIMIT`：
+1. 先看当前进度快照：`GET /api/bee/status`
+2. 关注：
+   - `tiers.top_5y.total` / `tiers.top_all.total`：是否已经播种入队（未播种时为 0）
+   - `backoffUntil`：退避时间戳（到点前不建议继续触发 seed）
+3. 到 `backoffUntil` 后，可手动触发一次轻量播种：
+   - `POST /api/bee/seed-step`
+4. 播种成功后应看到 `top_5y.total=100`、`top_all.total=200`，随后 tick 日志会开始出现 `top_5y=3` / `top_all=3` 的同步记录。
 
 ---
 

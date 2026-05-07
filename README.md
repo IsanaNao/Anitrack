@@ -28,6 +28,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **🐝 Intelligent Data Mirroring（Bee System）**：
   - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
   - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
+  - **多级优先级镜像**：`seasonal`（当季）＞ `top_1y`（Top40）＞ `top_5y`（Top100）＞ `top_all`（Top200）＞ `backfill`（季度回滚补漏），并通过 `tier/priority` 在数据库中持久化队列状态。
   - **Mirror-first** 策略：Schedule / Recommendation 等高频读路径优先走本地镜像，显著降低对三方 API 的依赖，从工程上缓解 **429 Rate Limit** 风险（配合 24h 缓存进一步加固）。
 
 ### 2) 契约驱动开发（Contract-Driven）
@@ -80,6 +81,9 @@ cd Anitrack
 MONGODB_URI=你的MongoDB连接字符串
 JIKAN_BASE_URL=https://api.jikan.moe/v4
 SYNC_ENABLED=true
+# 可选：控制 Bee 启动时/重试时播种哪些 Top 队列（避免频繁触发 429）
+# 例：只跑 Top100/Top200：top_5y,top_all
+BEE_ENABLED_TOP_TIERS=top_1y,top_5y,top_all
 # 可选：礼貌爬取标识
 JIKAN_USER_AGENT=AnitrackBee/1.0 (+contact=you@example.com)
 ```
@@ -122,4 +126,42 @@ npm run test:integration
 cd ../anitrack-tester/contract-validator
 node run-contract-test.js
 ```
+## 关于小蜜蜂系统
+### 429 限流后的“下次怎么继续”（Runbook）
 
+当启动或手动触发播种时，如果看到：
+
+- `seed failed (...): status=429 code=UPSTREAM_RATE_LIMIT ...`
+
+说明 Jikan 限流了。此时 Bee 会进入**退避窗口**（backoff），并把下一次允许播种的时间写入 `backoffUntil`。
+
+#### 1) 查看当前镜像进度与 backoff
+
+仪表盘式查询爬取进程可以通过：
+```PowerSchell
+curl.exe -s http://localhost:3001/api/bee/status
+```
+
+你会拿到类似：
+
+- `tiers.top_5y.total` / `tiers.top_all.total`：是否已经成功播种进队列（未播种时 total=0）
+- `backoffUntil`：若 >0 表示在该时间点之前不要继续触发 seed（否则大概率继续 429）
+
+#### 2) 等 backoff 结束后，手动触发一次播种（轻量、只播种一档）
+
+```PowerSchell
+curl.exe -s -X POST http://localhost:3001/api/bee/seed-step
+```
+
+手动触发一次同步 batch（默认 3 条）
+```PowerSchell
+curl.exe -s -X POST "http://localhost:3001/api/bee/sync-step?batchSize=3"
+```
+
+它们都会返回一份新的进度快照（和 `/api/bee/status` 一样）。
+
+#### 你应该看到什么（成功信号）
+- `top_5y.total` 变为 **100**，`top_all.total` 变为 **200**（说明队列已播种）
+- 随后后端日志会出现类似：
+  - `[Mirror] Synced 3 this tick (top_5y=3) ... progress=...`
+  - `[Mirror] Synced 3 this tick (top_all=3) ... progress=...`

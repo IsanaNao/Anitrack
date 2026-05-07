@@ -33,6 +33,20 @@ export class AnimeMirror {
     index: true,
   })
   source!: 'seasonal' | 'general';
+
+  @Prop({
+    type: String,
+    required: true,
+    trim: true,
+    default: 'backfill',
+    enum: ['seasonal', 'top_1y', 'top_5y', 'top_all', 'backfill'],
+    index: true,
+  })
+  tier!: 'seasonal' | 'top_1y' | 'top_5y' | 'top_all' | 'backfill';
+
+  // Lower number = higher priority.
+  @Prop({ type: Number, required: true, default: 100, index: true })
+  priority!: number;
 }
 
 export const AnimeMirrorSchema = SchemaFactory.createForClass(AnimeMirror);

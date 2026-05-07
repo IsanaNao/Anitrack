@@ -133,12 +133,19 @@
 
 ### 4.8 Bee（Anime Mirror System，后台镜像同步）
 - [x] 新增 `Bee` 模块：`src/modules/bee/*`（Cron + 受控速率抓取）
-- [x] 新增集合 `AnimeMirror`：`malId(unique) + data(JSON) + lastUpdated + source(seasonal/general)`
+- [x] 新增集合 `AnimeMirror`：`malId(unique) + data(JSON) + lastUpdated + source + tier + priority`
+- [x] 新增集合 `BeeState`：用于“季度回滚补漏”的断点游标（重启继续）
 - [x] Cron 节奏：每 65 秒执行一次，每次同步 3 个条目（礼貌抓取，带 User-Agent）
 - [x] 断点续爬：基于 `lastUpdated` 选择缺失/过期条目，重启后从 DB 状态继续
-- [x] 数据保鲜：seasonal 3 天 / general 30 天
+- [x] 数据保鲜（按 tier）：seasonal 7 天 / top40 30 天 / top100 60 天 / top200 180 天 / backfill 60 天
+- [x] 多级优先级：seasonal ＞ top40 ＞ top100 ＞ top200 ＞ 季度回滚 backfill（全部跑满后才启动回滚）
 - [x] 读路径适配：`AnimeMetaService.getOrFetchByMalId` 先查 mirror（fresh 命中则落 `AnimeMeta`），miss 时再走 Jikan，并被动 enqueue general
 - [x] 开关：`SYNC_ENABLED=true` 时启动后自动 seed `/seasons/now` 并开始静默同步（控制台输出进度）
+- [x] Seed 重试：每 30 分钟低频重试播种 top tiers（upsert，不会重复写入），避免启动时短暂 429 导致 tier 不完整
+- [x] 手动触发/排障：
+  - `GET /api/bee/status`：查看 tiers 进度 + `backoffUntil`
+  - `POST /api/bee/seed-step`：在 backoff 结束后，手动触发一次轻量播种（只播种一档）
+  - `POST /api/bee/sync-step?batchSize=3`：手动触发一次同步 batch
 
 ---
 

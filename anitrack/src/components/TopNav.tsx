@@ -26,6 +26,7 @@ export function TopNav() {
         </Link>
         <nav className="flex items-center gap-1">
           <NavLink href="/">Dashboard</NavLink>
+          <NavLink href="/timetable">Timetable</NavLink>
           <NavLink href="/library">Library</NavLink>
           <NavLink href="/profile">Profile</NavLink>
         </nav>

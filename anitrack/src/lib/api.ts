@@ -223,3 +223,30 @@ export async function getHeatmap(params?: {
   return fetcher<LifeMonthHeatmapResponse>(`/stats/heatmap${suffix}`);
 }
 
+export type MonthlyActivityResponse = {
+  month: string; // YYYY-MM
+  added: AnimeEntry[];
+  completed: AnimeEntry[];
+};
+
+export async function getMonthlyActivity(params: {
+  month: string; // YYYY-MM
+}): Promise<MonthlyActivityResponse> {
+  const qs = new URLSearchParams();
+  qs.set("month", params.month);
+  return fetcher<MonthlyActivityResponse>(`/stats/activity?${qs.toString()}`);
+}
+
+export type StatsSummaryResponse = {
+  total: number;
+  totalCompleted: number;
+  totalWatching: number;
+  avgRating: number | null;
+  ratedCount: number;
+  totalEpisodesWatched: number;
+};
+
+export async function getStatsSummary(): Promise<StatsSummaryResponse> {
+  return fetcher<StatsSummaryResponse>(`/stats/summary`);
+}
+

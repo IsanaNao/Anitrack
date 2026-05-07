@@ -34,15 +34,19 @@ export function AnimeCard({
   const tags = (genres ?? []).slice(0, 3);
   const total = typeof totalEpisodes === "number" ? totalEpisodes : undefined;
   const watched = typeof episodesWatched === "number" ? episodesWatched : undefined;
+  const progress =
+    total != null && total > 0
+      ? Math.max(0, Math.min(100, Math.round(((watched ?? 0) / total) * 100)))
+      : null;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="aspect-[3/4] w-full bg-zinc-100 dark:bg-zinc-900">
+    <div className="aspect-[2/3] w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="h-48 w-full bg-zinc-100 dark:bg-zinc-900">
         {imageUrl ? (
           <img
             src={imageUrl}
             alt={title}
-            className="h-full w-full object-cover"
+            className="h-48 w-full object-cover"
             loading="lazy"
           />
         ) : (
@@ -51,10 +55,23 @@ export function AnimeCard({
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-2 p-3">
+      <div className="flex h-[calc(100%-12rem)] flex-col gap-2 p-3">
         <div className="line-clamp-2 text-sm font-semibold leading-5">
           {title}
         </div>
+        {progress != null ? (
+          <div className="grid gap-1">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+              <div
+                className="h-full rounded-full bg-emerald-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              进度 {progress}%（{watched ?? 0}/{total}）
+            </div>
+          </div>
+        ) : null}
         {tags.length ? (
           <div className="flex flex-wrap gap-1.5">
             {tags.map((t) => (
@@ -76,11 +93,6 @@ export function AnimeCard({
           >
             {status}
           </span>
-          {total != null ? (
-            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-              {watched ?? 0} / {total} 集
-            </span>
-          ) : null}
           <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
             malId: {malId}
           </span>

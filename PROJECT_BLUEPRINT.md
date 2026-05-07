@@ -43,6 +43,8 @@
   - 按星期/更新时间分组
   - 显示标题、封面、播出信息、外链
 
+> **实现状态（当前基线）**：已新增前端页面 `/timetable`（UI 占位，数据为 mock）。下一步将按“Jikan schedule → 后端聚合 + 24h 缓存 → 前端按日期/星期分列”的路径落地真实数据。
+
 ### 1.3 Anime Heatmap（Highlight：绿墙）
 基于用户追番行为，生成类似 GitHub contributions 的“人生纸格”（按月）。
 
@@ -273,6 +275,42 @@
 
 ---
 
+### 3.7.1 `GET /api/stats/activity?month=YYYY-MM`
+返回某个月份的 Activity 列表（Added/Completed），用于 Profile 页点击热力图格子后展示明细。
+
+#### Query
+- `month`：`YYYY-MM`（必填）
+
+#### 200 Response
+
+```json
+{
+  "month": "2026-05",
+  "added": [ { "id": "...", "malId": 1, "status": "PLANNED", "animeMeta": { "title": "..." } } ],
+  "completed": [ { "id": "...", "malId": 2, "status": "COMPLETED", "completedAt": "2026-05-03" } ]
+}
+```
+
+---
+
+### 3.7.2 `GET /api/stats/summary`
+用于 Dashboard/Profile 顶部统计卡片的一次性聚合接口，避免前端分页拉取造成性能与一致性问题。
+
+#### 200 Response
+
+```json
+{
+  "total": 15,
+  "totalCompleted": 4,
+  "totalWatching": 6,
+  "avgRating": 8.7,
+  "ratedCount": 12,
+  "totalEpisodesWatched": 36
+}
+```
+
+---
+
 ### 3.8 数据缓存层（AnimeMeta Cache，战略预留）
 
 > **目标**：将 Jikan（MyAnimeList 公开数据）的读路径从「每次直连外部 API」迁移为「以 MongoDB 为影子库的 **Cache-Aside**」，在课程与后续个人博客场景下均可复用。
@@ -285,6 +323,9 @@
 - **工程收益**：显著降低对外部 API 的耦合与 **429** 风险；本地索引（如 `malId` unique）支撑「类 **10 亿级**」夸张表述下的 **常数级主键查找**（相对每次 HTTP 往返的数量级差异）。
 
 > **实现状态**：已在 NestJS 后端落地为双表结构：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）。创建条目时采用 **Cache-Aside**：先查/写 `AnimeMeta`，再写 `AnimeEntry`，并在返回体中嵌套 `animeMeta`。
+
+#### 3.8.4 运行时缓存（CacheModule，24h）
+除 MongoDB 的影子库缓存外，后端已引入 NestJS `CacheModule`，对所有 Jikan HTTP 请求做 24h 缓存（cache key 基于完整 URL），用于从根源降低 429（Rate Limit）发生概率。
 
 #### 3.8.1 Jikan 搜索中转（Search → Upsert → Return）
 为避免前端直连外部 API，新增后端中转接口：
@@ -574,6 +615,10 @@
   - 右侧上方：Heatmap（固定可见）
   - 右侧下方：Seasonal Schedule（表格/卡片）
 
+#### Timetable（时间表页）
+- 形态：横向滚动的“日期列”（每列为一天），列内按时间排序显示番剧条目
+- 交互：支持 7/14 天范围切换；后续可加“按星期”过滤与搜索
+
 ### 7.3 Heatmap 组件规范
 - 单元格：正方形（例如 10-14px），间距 2px
 - 颜色：按 `intensity 0-4` 对应 5 档绿色（0 为灰/背景）
@@ -652,7 +697,7 @@
 ### 10.2 下一阶段焦点（阶段 3）
 
 - **Jikan**：`GET /api/anime-meta/search` 支持分页（`page/pageSize`），并返回 Jikan `pagination`；搜索结果 bulk upsert 写入 `AnimeMeta`（含 `synopsis/genres/totalEpisodes`）。
-- **前端**：完成多页面路由与深交互（debounce 搜索 + 分页；Library 全局单实例 Dialog 编辑/删除；Profile 绿墙与统计）。
+- **前端**：完成多页面路由与深交互（debounce 搜索 + 分页；Library 全局单实例 Dialog 编辑/删除；Profile 绿墙与统计）。Dashboard 当前仍包含部分占位区块（后续将按 “The Pulse” 方向激活）。
 
 ### 10.3 实现侧备忘（避免重复踩坑）
 

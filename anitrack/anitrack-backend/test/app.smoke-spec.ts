@@ -22,6 +22,11 @@ describe('NestJS backend smoke (e2e)', () => {
   let app: INestApplication<App>;
   let mongo: MongoMemoryServer | null = null;
 
+  function randomMalId() {
+    // Avoid collisions with any persistent dev DB.
+    return 2_000_000_000 + Math.floor(Math.random() * 100_000_000);
+  }
+
   beforeAll(async () => {
     // Prefer real DB if provided; otherwise use in-memory MongoDB.
     if (!process.env.MONGODB_URI || !process.env.MONGODB_URI.trim()) {
@@ -85,39 +90,57 @@ describe('NestJS backend smoke (e2e)', () => {
     }
   });
 
-  it('heatmap contract: GET /api/stats/heatmap returns weeks with weekStart+days[count,intensity]', async () => {
+  it('heatmap contract: GET /api/stats/heatmap returns start/end/months[]', async () => {
     // Ensure DB connection is established before aggregation (avoids first-call 500 in some environments).
+    const malId = randomMalId();
     await request(app.getHttpServer())
       .post('/api/anime')
-      .send({ malId: 999000, status: 'COMPLETED' })
+      .send({ malId, status: 'COMPLETED' })
       .expect(201);
 
     const res = await request(app.getHttpServer())
       .get('/api/stats/heatmap')
       .expect(200);
 
-    expect(res.body).toHaveProperty('from');
-    expect(res.body).toHaveProperty('to');
-    expect(Array.isArray(res.body.weeks)).toBe(true);
+    expect(res.body).toHaveProperty('start');
+    expect(res.body).toHaveProperty('end');
+    expect(Array.isArray(res.body.months)).toBe(true);
 
     // structure check (no dependency on seeded data)
-    if (res.body.weeks.length > 0) {
-      const w = res.body.weeks[0];
-      expect(w).toHaveProperty('weekStart');
-      expect(Array.isArray(w.days)).toBe(true);
-      if (w.days.length > 0) {
-        const d = w.days[0];
-        expect(d).toHaveProperty('count');
-        expect(d).toHaveProperty('intensity');
-      }
+    if (res.body.months.length > 0) {
+      const m = res.body.months[0];
+      expect(m).toHaveProperty('month');
+      expect(m).toHaveProperty('addedCount');
+      expect(m).toHaveProperty('completedCount');
+      expect(m).toHaveProperty('episodeCount');
+      expect(m).toHaveProperty('intensity');
     }
+  });
+
+  it('heatmap validation: start > end returns 400 VALIDATION_ERROR envelope', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/stats/heatmap?start=2026-05&end=2026-04')
+      .expect(400);
+
+    expectErrorEnvelope(res.body);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('heatmap validation: invalid tz returns 400 VALIDATION_ERROR envelope', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/stats/heatmap?tz=Invalid/Timezone')
+      .expect(400);
+
+    expectErrorEnvelope(res.body);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('state machine: invalid transition returns 409 INVALID_STATUS_TRANSITION envelope', async () => {
     // Create DROPPED
+    const malId = randomMalId();
     const created = await request(app.getHttpServer())
       .post('/api/anime')
-      .send({ malId: 999001, status: 'DROPPED' })
+      .send({ malId, status: 'DROPPED' })
       .expect(201);
 
     const id = created.body?.id;
@@ -134,9 +157,10 @@ describe('NestJS backend smoke (e2e)', () => {
   });
 
   it('data flow: create -> get -> patch -> delete', async () => {
+    const malId = randomMalId();
     const created = await request(app.getHttpServer())
       .post('/api/anime')
-      .send({ malId: 999002, status: 'PLANNED' })
+      .send({ malId, status: 'PLANNED' })
       .expect(201);
 
     const id = created.body?.id;

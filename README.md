@@ -19,8 +19,12 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **状态机约束**：严格校验番剧状态迁移（如：只有 `WATCHING` 或 `DROPPED` 可以转为 `COMPLETED`），防止非法数据入库。
 - **自动时间戳管理**：当番剧标记为“已完成”时，系统会自动维护 `completedDates` 数组，支持多周目（Rewatch）记录。
 - **高性能聚合查询**：使用 MongoDB Aggregation Pipeline 进行数据规范化与统计，后端直接输出带“强度值（Intensity）”的热力图 JSON。
+- **统计接口后端化**：
+  - `GET /api/stats/summary`：Profile/Dashboard 顶部指标（总量、完成数、在看数、平均评分、已看总集数）
+  - `GET /api/stats/activity?month=YYYY-MM`：月度 Activity（Added/Completed 列表），前端不再全量拉取再过滤
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
+- **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
 
 ### 2) 契约驱动开发（Contract-Driven）
 
@@ -37,7 +41,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 
 ## 🛠 技术栈
 
-- **Frontend**: Next.js 14 (App Router), Tailwind CSS, Lucide React
+- **Frontend**: Next.js (App Router), Tailwind CSS
 - **Backend**: NestJS 11, Mongoose, Swagger (OpenAPI 3.0)
 - **Database**: MongoDB Atlas
 - **Validation**: class-validator / class-transformer（NestJS）
@@ -48,7 +52,8 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 
 - [x] 阶段 1：核心 Watchlist CRUD 与数据库持久化
 - [x] 阶段 2：统计聚合逻辑与多维自动化测试
-- [ ] 阶段 3（进行中）：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发
+- [x] 阶段 3：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发（Dashboard/The Pulse、Profile Heatmap、Library Dialog）
+- [ ] 阶段 4（进行中）：Timetable（时间表页）与推荐模块从占位升级为真实数据；进一步性能与鲁棒性收口
 - [ ] 阶段 4：用户认证与多用户数据隔离
 
 ## 🛠 快速开始（给队友）

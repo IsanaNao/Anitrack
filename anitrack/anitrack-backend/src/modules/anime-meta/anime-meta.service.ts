@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ConfigService } from '@nestjs/config';
+import { Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import type { Cache } from 'cache-manager';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
 import { AnimeMeta, AnimeMetaDocument } from './schemas/anime-meta.schema';
 import type { JikanPagination } from './dto/anime-meta-search.dto';
@@ -37,6 +40,7 @@ export class AnimeMetaService {
     @InjectModel(AnimeMeta.name)
     private readonly model: Model<AnimeMetaDocument>,
     private readonly config: ConfigService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   private jikanBaseUrl() {
@@ -77,13 +81,14 @@ export class AnimeMetaService {
     return out;
   }
 
-  private async jikanSearchOnce(args: {
-    q: string;
-    page: number;
-    limit: number;
-  }) {
-    const baseUrl = this.jikanBaseUrl();
-    const url = `${baseUrl}/anime?q=${encodeURIComponent(args.q)}&page=${encodeURIComponent(String(args.page))}&limit=${encodeURIComponent(String(args.limit))}&sfw=true`;
+  private jikanCacheTtlSeconds() {
+    return 24 * 60 * 60; // 24h
+  }
+
+  private async cachedJikanJson<T>(url: string): Promise<T> {
+    const key = `jikan:${url}`;
+    const cached = await this.cache.get<T>(key);
+    if (cached) return cached;
 
     let res: Response;
     try {
@@ -114,9 +119,9 @@ export class AnimeMetaService {
       );
     }
 
-    let json: JikanSearchResponse;
+    let json: T;
     try {
-      json = (await res.json()) as JikanSearchResponse;
+      json = (await res.json()) as T;
     } catch {
       throw new ApiErrorException(
         502,
@@ -125,7 +130,18 @@ export class AnimeMetaService {
       );
     }
 
+    await this.cache.set(key, json, this.jikanCacheTtlSeconds() * 1000);
     return json;
+  }
+
+  private async jikanSearchOnce(args: {
+    q: string;
+    page: number;
+    limit: number;
+  }) {
+    const baseUrl = this.jikanBaseUrl();
+    const url = `${baseUrl}/anime?q=${encodeURIComponent(args.q)}&page=${encodeURIComponent(String(args.page))}&limit=${encodeURIComponent(String(args.limit))}&sfw=true`;
+    return this.cachedJikanJson<JikanSearchResponse>(url);
   }
 
   async findByMalIds(malIds: number[]) {
@@ -258,48 +274,7 @@ export class AnimeMetaService {
 
     const baseUrl = this.jikanBaseUrl();
     const url = `${baseUrl}/anime/${encodeURIComponent(String(malId))}?sfw=true`;
-
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        headers: { accept: 'application/json' },
-      });
-    } catch (e: any) {
-      throw new ApiErrorException(
-        502,
-        'UPSTREAM_ERROR',
-        `Failed to reach Jikan API: ${e?.message ?? e}`,
-      );
-    }
-
-    if (res.status === 429) {
-      const retryAfter = res.headers.get('retry-after');
-      const hint = retryAfter ? ` (retry-after=${retryAfter}s)` : '';
-      throw new ApiErrorException(
-        429,
-        'UPSTREAM_RATE_LIMIT',
-        `Jikan rate limit exceeded${hint}`,
-      );
-    }
-
-    if (!res.ok) {
-      throw new ApiErrorException(
-        502,
-        'UPSTREAM_ERROR',
-        `Jikan API returned HTTP ${res.status}`,
-      );
-    }
-
-    let json: JikanAnimeResponse;
-    try {
-      json = (await res.json()) as JikanAnimeResponse;
-    } catch {
-      throw new ApiErrorException(
-        502,
-        'UPSTREAM_ERROR',
-        'Jikan API returned invalid JSON',
-      );
-    }
+    const json = await this.cachedJikanJson<JikanAnimeResponse>(url);
 
     const data = json?.data;
     const title = (data?.title ?? '').trim();

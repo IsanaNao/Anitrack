@@ -7,7 +7,7 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import type { LifeMonthCell } from "@/lib/api";
-import { getAnimeEntries, getHeatmap } from "@/lib/api";
+import { getHeatmap, getMonthlyActivity, getStatsSummary } from "@/lib/api";
 
 const START_DATE = "2005-05";
 
@@ -66,31 +66,9 @@ export default function ProfilePage() {
     queryFn: () => getHeatmap({ start: startMonth }),
   });
 
-  const completedStats = useQuery({
-    queryKey: ["anime", "stats", "completed"],
-    queryFn: async () => {
-      // Fetch all completed entries (paged) to compute totals robustly.
-      const pageSize = 100;
-      let page = 1;
-      let totalPages = 1;
-      let totalCompleted = 0;
-      let totalEpisodesWatched = 0;
-
-      do {
-        const res = await getAnimeEntries({
-          status: "COMPLETED",
-          page,
-          pageSize,
-          sort: "updatedAt:desc",
-        });
-        totalPages = res.totalPages;
-        totalCompleted = res.total;
-        for (const e of res.items) totalEpisodesWatched += e.episodesWatched ?? 0;
-        page += 1;
-      } while (page <= totalPages && page <= 50);
-
-      return { totalCompleted, totalEpisodesWatched };
-    },
+  const summary = useQuery({
+    queryKey: ["stats", "summary"],
+    queryFn: () => getStatsSummary(),
   });
 
   const months = heatmap.data?.months ?? [];
@@ -108,51 +86,14 @@ export default function ProfilePage() {
     return { startYear: sy, startMonthNum: sm, years: ys };
   }, [startMonth, now.year]);
 
-  // Load all entries once for activity list filtering.
-  const allEntries = useQuery({
-    queryKey: ["anime", "stats", "all"],
+  const activity = useQuery({
+    queryKey: ["stats", "activity", { month: selectedMonth }],
+    enabled: Boolean(selectedMonth),
     queryFn: async () => {
-      const pageSize = 100;
-      let page = 1;
-      let totalPages = 1;
-      const items: Awaited<ReturnType<typeof getAnimeEntries>>["items"] = [];
-      do {
-        const res = await getAnimeEntries({ page, pageSize, sort: "updatedAt:desc" });
-        totalPages = res.totalPages;
-        items.push(...res.items);
-        page += 1;
-      } while (page <= totalPages && page <= 50);
-      return items;
+      if (!selectedMonth) throw new Error("Missing selectedMonth");
+      return getMonthlyActivity({ month: selectedMonth });
     },
   });
-
-  const activity = useMemo(() => {
-    if (!selectedMonth) return null;
-    const items = allEntries.data ?? [];
-    const added = items.filter((e) => monthKeyUTC(e.createdAt) === selectedMonth);
-    const completed = items.filter(
-      (e) => e.status === "COMPLETED" && monthKeyUTC(e.completedAt) === selectedMonth,
-    );
-    return { added, completed };
-  }, [allEntries.data, selectedMonth]);
-
-  useEffect(() => {
-    if (!selectedMonth) return;
-    if (process.env.NODE_ENV === "production") return;
-    const items = allEntries.data ?? [];
-    console.log("[profile] selectedMonth=", selectedMonth);
-    console.log(
-      "[profile] sample dates=",
-      items.slice(0, 8).map((e) => ({
-        id: e.id,
-        status: e.status,
-        createdAt: e.createdAt,
-        createdKey: monthKeyUTC(e.createdAt),
-        completedAt: e.completedAt,
-        completedKey: monthKeyUTC(e.completedAt),
-      })),
-    );
-  }, [allEntries.data, selectedMonth]);
 
   const CELL_SIZE_CLASS = "h-3.5 w-3.5"; // ~14px, close to GitHub density
 
@@ -185,13 +126,13 @@ export default function ProfilePage() {
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
             <div className="text-xs text-zinc-500 dark:text-zinc-400">总观看部数（COMPLETED）</div>
             <div className="mt-1 text-2xl font-semibold">
-              {completedStats.data?.totalCompleted ?? 0}
+              {summary.data?.totalCompleted ?? 0}
             </div>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
             <div className="text-xs text-zinc-500 dark:text-zinc-400">已看总集数</div>
             <div className="mt-1 text-2xl font-semibold">
-              {completedStats.data?.totalEpisodesWatched ?? 0}
+              {summary.data?.totalEpisodesWatched ?? 0}
             </div>
           </div>
         </div>
@@ -205,6 +146,20 @@ export default function ProfilePage() {
           ) : heatmap.isError ? (
             <div className="text-xs text-red-600 dark:text-red-300">加载失败</div>
           ) : null}
+        </div>
+
+        <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <span>Legend</span>
+          <span className="ml-1">少</span>
+          <div className="flex items-center gap-1">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className={`h-3.5 w-3.5 rounded ${intensityClass(i)} border border-zinc-200 dark:border-zinc-800`}
+              />
+            ))}
+          </div>
+          <span>多</span>
         </div>
 
         <div className="mt-3 grid gap-3">
@@ -364,11 +319,13 @@ export default function ProfilePage() {
                 </button>
               </div>
 
-              {allEntries.isLoading ? (
+              {activity.isLoading ? (
                 <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">加载中…</div>
-              ) : allEntries.isError ? (
-                <div className="mt-3 text-sm text-red-600 dark:text-red-300">加载失败</div>
-              ) : !activity ? null : activity.added.length === 0 && activity.completed.length === 0 ? (
+              ) : activity.isError ? (
+                <div className="mt-3 text-sm text-red-600 dark:text-red-300">
+                  加载失败：{activity.error instanceof Error ? activity.error.message : "unknown error"}
+                </div>
+              ) : !activity.data ? null : activity.data.added.length === 0 && activity.data.completed.length === 0 ? (
                 <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
                   No recorded activity for this month.
                 </div>
@@ -379,11 +336,11 @@ export default function ProfilePage() {
                     <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
                       ✅ Completed
                     </div>
-                    {activity.completed.length === 0 ? (
+                    {activity.data.completed.length === 0 ? (
                       <div className="text-sm text-zinc-500 dark:text-zinc-400">无</div>
                     ) : (
                       <ul className="grid gap-2">
-                        {activity.completed.map((e) => (
+                        {activity.data.completed.map((e) => (
                           <li key={`c-${e.id}`} className="flex items-start gap-2">
                             <div className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
                             <div className="min-w-0">
@@ -404,11 +361,11 @@ export default function ProfilePage() {
                     <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
                       📥 Added
                     </div>
-                    {activity.added.length === 0 ? (
+                    {activity.data.added.length === 0 ? (
                       <div className="text-sm text-zinc-500 dark:text-zinc-400">无</div>
                     ) : (
                       <ul className="grid gap-2">
-                        {activity.added.map((e) => (
+                        {activity.data.added.map((e) => (
                           <li key={`a-${e.id}`} className="flex items-start gap-2">
                             <div className="mt-1 h-2 w-2 rounded-full bg-blue-500" />
                             <div className="min-w-0">

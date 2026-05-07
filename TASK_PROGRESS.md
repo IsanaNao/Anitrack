@@ -7,11 +7,14 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：**阶段 5 已完成（里程碑）**：多页面架构 + 深度交互（搜索分页、编辑弹窗、Profile 热图）
-- **正在做**：进入“收口与打磨”（契约/文档同步、UI polish、可选：Seasonal Schedule 与 Auth）
-- **下一步**：补齐（可选）Seasonal Schedule；完善契约/测试；评估是否接入 Auth（将 CurrentUser 从 dev fallback 升级为真实 user）
+- **当前阶段**：阶段 5+（增量交付）：Dashboard “The Pulse” 局部激活 + Profile 统计后端化 + Timetable UI 占位页
+- **正在做**：文档口径与实现对齐（Blueprint/README/进度文档同步）
+- **下一步**：
+  - Timetable：从 mock UI 升级为真实数据（Jikan schedule / 后端聚合 + 缓存）
+  - 推荐：从占位升级为每日推荐（Jikan random + Library 标签）
+  - Auth：替换 `TEMP_USER_ID`（JWT/Session）
 - **阻塞/风险**：Auth 未接入前，`CurrentUser` 仍会回退到 `TEMP_USER_ID`（技术债，见下）
-- **最后更新时间**：2026-04-29
+- **最后更新时间**：2026-05-07
 
 ---
 
@@ -73,7 +76,7 @@
 
 ### 3.3 集成测试（Integration，Vitest）
 - [x] `npm run test:integration`：`src/__tests__/integration/heatmap.integration.test.ts`（断言 Next.js `app/api/stats/heatmap` 已变为 **NestJS 代理**：转发 `start/end/tz` 并返回 `{ start,end,months[] }`）
-- [ ] Case C：heatmap 参数错误（400 + 错误体）可选加分
+- [x] Case C：heatmap 参数错误（400 + 错误体）已补齐（`start > end`、非法 `tz`），并在 NestJS e2e/smoke 中覆盖
 
 ### 3.4 自动化播种与契约回归
 - [x] **`heatmap-seeder.js`**：`api-test-suite` 下约 20 条 COMPLETED 播种；不清库；冲突重试；播种成功提示
@@ -105,11 +108,21 @@
 - [x] 年-月坐标系：纵轴 12 行（Jan–Dec），横轴年份列（起始年→当前年），支持起始偏移与“未来月份解锁”
 - [x] 悬停提示：GitHub 风格浮动 Tooltip（`pointer-events: none`）展示 added/completed/episodes
 - [x] 点击锁定：选中格子高亮（`ring-2 ring-blue-500`），下方展示 “Activity for YYYY-MM”（Added/Completed 时间轴列表）
-- [x] 口径统一：Activity 列表使用 `dayjs.utc(...).format('YYYY-MM')` 与后端 UTC 月聚合对齐，修复“Tooltip 有数据但列表为空”
+- [x] Activity 后端化：新增 `GET /api/stats/activity?month=YYYY-MM`，前端不再全量拉取再过滤（Profile 页点击月份 → 拉取该月 Added/Completed 列表）
+- [x] Legend：为 intensity 0-4 增加颜色图例
 
 ### 4.4 Seasonal Schedule（Jikan）
-- [ ] 获取当前季度 schedule（直连或走后端代理）
-- [ ] 移动端分组折叠 / 桌面端表格或栅格
+- [ ] 后端新增 `GET /api/anime-meta/schedule`：作为 Jikan 代理 + 缓存（TTL 24h），降低 429 风险
+- [ ] 前端新增 `/schedule` 页面：按周一到周日分组展示（失败态提供“检查 Jikan 服务状态”链接）
+
+### 4.6 Dashboard（The Pulse，计划）
+- [x] 激活 Profile & Stats：新增 `GET /api/stats/summary`，Dashboard 顶部展示总量/完成/评分等指标
+- [x] Watching Now：横向滚动流 + onWheel 劫持（区块内垂直滚轮映射为水平滚动），卡片统一 `aspect-[2/3]`、封面 `h-48 object-cover`、进度条
+- [x] Watching Now 卡片可点击：复用 `AnimeEntryDialog` 编辑进度/状态/评分
+- [ ] Daily Recommendation：暂用“新番随机推荐（占位）”，后续接入每日推荐算法
+
+### 4.7 Timetable（新增页面，占位）
+- [x] 新增 `/timetable` 页面：横向滚动的“日期列”时间表 UI（7天/14天切换），数据暂为 mock
 
 ### 4.5 Jikan 搜索中转 & 自动化入库（本次会话新增）
 - [x] `GET /api/anime-meta/search?q=...`：后端调用 Jikan V4 Search（limit=5）
@@ -160,6 +173,14 @@
   - 前端：Library 采用“全局单实例 Dialog”编辑条目（status/rating/episodesWatched）+ 删除；所有写操作统一 `invalidateQueries(["anime"])`
   - 前端：`/profile` 从“过去一年日历绿墙”升级为“人生纸格（月）”，支持自定义起始月份（先以 `START_DATE` 常量占位），并提供悬停详情（added/completed/episodes）
   - 前端：热力图进一步重构为“年(横轴)×月(纵轴)”坐标系 + 浮动 Tooltip + 点击 Activity 列表；Next.js `app/api/stats/heatmap` 统一为 NestJS 代理
+
+- **2026-05-07（The Pulse 增量交付）**：
+  - 后端：新增 `GET /api/stats/activity?month=YYYY-MM`（月度 Activity 聚合）与 `GET /api/stats/summary`（Profile/Dashboard 顶部指标）
+  - 后端：引入 NestJS `CacheModule`，Jikan 请求统一缓存 24h（彻底缓解 429）
+  - 后端：补齐 heatmap 参数校验 e2e（`start > end`、非法 `tz` → 400 错误信封）
+  - 前端：Dashboard “正在观看”改为横向滚动流 + onWheel 映射；AnimeCard 统一比例与进度条；卡片可点击打开编辑 Dialog
+  - 前端：Profile Heatmap 增加 Legend；Activity 面板改为后端接口驱动
+  - 前端：新增 Timetable 页面（UI 占位）与 Dashboard 底部“新番随机推荐（占位）”
 
 ---
 

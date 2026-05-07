@@ -32,6 +32,10 @@ export function AnimeEntryDialog({
 }) {
   const qc = useQueryClient();
 
+  // Radix Dialog (Portal) is sensitive to being unmounted while open.
+  // Guard against transient states where `open` is true but `entry` becomes null.
+  const actualOpen = open && Boolean(entry);
+
   const totalEpisodes =
     entry?.animeMeta?.totalEpisodes ?? entry?.animeMeta?.episodes ?? undefined;
 
@@ -102,7 +106,17 @@ export function AnimeEntryDialog({
     },
   });
 
-  if (!entry) return null;
+  if (!entry) {
+    // Keep Dialog.Root mounted to avoid Portal cleanup races, but render nothing.
+    return (
+      <Dialog.Root
+        open={false}
+        onOpenChange={(v) => {
+          if (!v) onOpenChange(false);
+        }}
+      />
+    );
+  }
 
   const synopsis = (entry.animeMeta?.synopsis ?? "").trim();
   const title = entry.animeMeta?.title ?? `malId: ${entry.malId}`;
@@ -111,32 +125,41 @@ export function AnimeEntryDialog({
     typeof totalEpisodes === "number" && totalEpisodes > 0 ? totalEpisodes : 100000;
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 w-[min(92vw,720px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <Dialog.Title className="truncate text-base font-semibold">
-                {title}
-              </Dialog.Title>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {genres.slice(0, 6).map((g) => (
-                  <span
-                    key={g}
-                    className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-                  >
-                    {g}
-                  </span>
-                ))}
+    <Dialog.Root
+      open={actualOpen}
+      onOpenChange={(v) => {
+        if (!v) onOpenChange(false);
+      }}
+    >
+      {actualOpen ? (
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 w-[min(92vw,720px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
+            <Dialog.Title className="sr-only">{title}</Dialog.Title>
+            <Dialog.Description className="sr-only">
+              编辑番剧条目：状态、评分、已看集数，以及删除操作。
+            </Dialog.Description>
+
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="truncate text-base font-semibold">{title}</div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {genres.slice(0, 6).map((g) => (
+                    <span
+                      key={g}
+                      className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                    >
+                      {g}
+                    </span>
+                  ))}
+                </div>
               </div>
+              <Dialog.Close asChild>
+                <button className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900">
+                  关闭
+                </button>
+              </Dialog.Close>
             </div>
-            <Dialog.Close asChild>
-              <button className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900">
-                关闭
-              </button>
-            </Dialog.Close>
-          </div>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1">
@@ -236,8 +259,9 @@ export function AnimeEntryDialog({
               </button>
             </div>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
+          </Dialog.Content>
+        </Dialog.Portal>
+      ) : null}
     </Dialog.Root>
   );
 }

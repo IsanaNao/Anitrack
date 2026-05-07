@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
+import { AnimeMetaService } from '../anime-meta/anime-meta.service';
 import {
   AnimeEntry,
   AnimeEntryDocument,
@@ -47,7 +48,114 @@ export class StatsService {
   constructor(
     @InjectModel(AnimeEntry.name)
     private readonly model: Model<AnimeEntryDocument>,
+    private readonly animeMeta: AnimeMetaService,
   ) {}
+
+  async summary(userId: string) {
+    const [total, totalCompleted, totalWatching, ratingAgg, episodesAgg] =
+      await Promise.all([
+        this.model.countDocuments({ userId }),
+        this.model.countDocuments({ userId, status: 'COMPLETED' }),
+        this.model.countDocuments({ userId, status: 'WATCHING' }),
+        this.model.aggregate<{ _id: null; avgRating: number; ratedCount: number }>(
+          [
+            {
+              $match: {
+                userId,
+                rating: { $exists: true, $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                avgRating: { $avg: '$rating' },
+                ratedCount: { $sum: 1 },
+              },
+            },
+          ],
+        ),
+        this.model.aggregate<{ _id: null; totalEpisodesWatched: number }>([
+          { $match: { userId, status: 'COMPLETED' } },
+          {
+            $group: {
+              _id: null,
+              totalEpisodesWatched: { $sum: { $ifNull: ['$episodesWatched', 0] } },
+            },
+          },
+        ]),
+      ]);
+
+    const avgRatingRaw = ratingAgg?.[0]?.avgRating;
+    const avgRating =
+      typeof avgRatingRaw === 'number' && Number.isFinite(avgRatingRaw)
+        ? Math.round(avgRatingRaw * 10) / 10
+        : null;
+
+    return {
+      total,
+      totalCompleted,
+      totalWatching,
+      avgRating,
+      ratedCount: Number(ratingAgg?.[0]?.ratedCount ?? 0) || 0,
+      totalEpisodesWatched:
+        Number(episodesAgg?.[0]?.totalEpisodesWatched ?? 0) || 0,
+    };
+  }
+
+  async activity(userId: string, monthRaw: string) {
+    const month = String(monthRaw ?? '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new ApiErrorException(
+        400,
+        'VALIDATION_ERROR',
+        'Invalid month format (expected YYYY-MM)',
+        [{ path: 'month', reason: 'Expected YYYY-MM' }],
+      );
+    }
+
+    const [yy, mm] = month.split('-').map((x) => Number(x));
+    const monthStart = new Date(Date.UTC(yy, (mm ?? 1) - 1, 1, 0, 0, 0, 0));
+    const nextMonthStart = new Date(
+      Date.UTC(yy, (mm ?? 1) - 1 + 1, 1, 0, 0, 0, 0),
+    );
+
+    const [addedDocs, completedDocs] = await Promise.all([
+      this.model
+        .find({
+          userId,
+          createdAt: { $gte: monthStart, $lt: nextMonthStart },
+        })
+        .sort({ createdAt: -1 })
+        .limit(500),
+      this.model
+        .find({
+          userId,
+          status: 'COMPLETED',
+          completedAt: { $regex: `^${month}` },
+        })
+        .sort({ completedAt: -1 })
+        .limit(500),
+    ]);
+
+    const malIds = Array.from(
+      new Set([...addedDocs, ...completedDocs].map((d) => d.malId)),
+    );
+    const metas = await this.animeMeta.findByMalIds(malIds);
+    const metaByMalId = new Map<number, any>(metas.map((m: any) => [m.malId, m]));
+
+    const hydrate = (docs: AnimeEntryDocument[]) =>
+      docs.map((d) => {
+        const json = d.toJSON() as any;
+        json.animeMeta = metaByMalId.get(d.malId) ?? null;
+        return json;
+      });
+
+    return {
+      month,
+      added: hydrate(addedDocs),
+      completed: hydrate(completedDocs),
+    };
+  }
 
   async heatmap(userId: string, query: HeatmapQueryDto) {
     const tz = query.tz ?? 'UTC';

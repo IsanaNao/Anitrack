@@ -25,6 +25,10 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
 - **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
+- **🐝 Intelligent Data Mirroring（Bee System）**：
+  - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
+  - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
+  - **Mirror-first** 策略：Schedule / Recommendation 等高频读路径优先走本地镜像，显著降低对三方 API 的依赖，从工程上缓解 **429 Rate Limit** 风险（配合 24h 缓存进一步加固）。
 
 ### 2) 契约驱动开发（Contract-Driven）
 
@@ -75,6 +79,9 @@ cd Anitrack
 ```plaintext
 MONGODB_URI=你的MongoDB连接字符串
 JIKAN_BASE_URL=https://api.jikan.moe/v4
+SYNC_ENABLED=true
+# 可选：礼貌爬取标识
+JIKAN_USER_AGENT=AnitrackBee/1.0 (+contact=you@example.com)
 ```
 
 ### 3) 启动开发服务器

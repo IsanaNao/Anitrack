@@ -324,9 +324,6 @@
 
 > **实现状态**：已在 NestJS 后端落地为双表结构：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）。创建条目时采用 **Cache-Aside**：先查/写 `AnimeMeta`，再写 `AnimeEntry`，并在返回体中嵌套 `animeMeta`。
 
-#### 3.8.4 运行时缓存（CacheModule，24h）
-除 MongoDB 的影子库缓存外，后端已引入 NestJS `CacheModule`，对所有 Jikan HTTP 请求做 24h 缓存（cache key 基于完整 URL），用于从根源降低 429（Rate Limit）发生概率。
-
 #### 3.8.1 Jikan 搜索中转（Search → Upsert → Return）
 为避免前端直连外部 API，新增后端中转接口：
 - `GET /api/anime-meta/search?q=...`：
@@ -342,9 +339,61 @@
 - 若抓取/读取 `AnimeMeta` 失败：记录错误日志但 **不阻断** `AnimeEntry` 创建
 - 此时响应体中的 `animeMeta` 为 `null`
 
+#### 3.8.4 运行时缓存（CacheModule，24h）
+除 MongoDB 的影子库缓存外，后端已引入 NestJS `CacheModule`，对所有 Jikan HTTP 请求做 24h 缓存（cache key 基于完整 URL），用于从根源降低 429（Rate Limit）发生概率。
+
 ---
 
-### 3.9 多用户扩展性备忘（未来迁移至个人博客）
+### 3.9 Bee：Anime Mirror System（Cron 镜像同步）
+
+> 目标：为 Schedule / Recommendation 等“读多写少且强依赖第三方”的功能提供 **本地数据镜像**，用受控速率后台抓取 Jikan 并写入 MongoDB，做到：
+> - **礼貌爬取**：低频、可控批次，带 `User-Agent`
+> - **断点续爬**：重启后从 DB 的 `lastUpdated` 状态继续，不重新从头刷
+> - **数据保鲜**：当季番更新快（3 天），老番更新慢（30 天）
+> - **读路径 Mirror-first**：需要元数据时优先用镜像，缺失再被动抓取
+
+#### 3.9.1 目录结构（后端）
+
+```text
+anitrack-backend/src/modules/bee/
+├── bee.module.ts
+├── bee.service.ts
+├── bee.cron.ts
+└── schemas/
+    └── anime-mirror.schema.ts
+```
+
+#### 3.9.2 Collection：`AnimeMirror`
+- `malId: number`（unique index）
+- `data: object`（Jikan 返回全量 JSON）
+- `lastUpdated: Date`
+- `source: 'seasonal' | 'general'`
+
+#### 3.9.3 调度节奏（避免 60 秒边界）
+- **每 65 秒**执行一次
+- 每次同步 **3 个**条目（`/anime/{id}`）
+
+#### 3.9.4 优先级策略（seasonal → general）
+1. 启动后（仅当 `SYNC_ENABLED=true`）调用 `/seasons/now` 获取当季 `malId`，写入镜像队列（`source=seasonal`）
+2. Cron 每次优先挑选 seasonal 的“缺失/过期”条目同步
+3. seasonal 没有待更新时再同步 general
+
+#### 3.9.5 数据保鲜（TTL）
+- seasonal：`lastUpdated` 超过 **3 天** → 视为过期
+- general：`lastUpdated` 超过 **30 天** → 视为过期
+
+#### 3.9.6 读路径适配（Mirror-first）
+`AnimeMetaService.getOrFetchByMalId()`：
+- 优先查 `AnimeMirror` 的 fresh 数据，命中则直接落地 `AnimeMeta`
+- miss 时再走 Jikan（并被动 enqueue general，交给 Bee 后台补齐）
+
+#### 3.9.7 环境变量（开发环境特化）
+- `SYNC_ENABLED=true`：启用 Bee 静默同步与启动 seed
+- `JIKAN_USER_AGENT=...`：可选，覆盖默认 UA（建议写联系邮箱）
+
+---
+
+### 3.10 多用户扩展性备忘（未来迁移至个人博客）
 
 > 当前仓库以 **单用户 / 无鉴权** 为主，便于课程交付；以下约束便于未来引入 **`userId` 隔离** 时少改表结构。
 
@@ -355,7 +404,7 @@
 
 ---
 
-### 3.10 NestJS Backend Migration（Next.js → NestJS，架构平移）
+### 3.11 NestJS Backend Migration（Next.js → NestJS，架构平移）
 
 > 目标：在 **不改变任何 API 字段名** 的前提下，将后端从 Next.js Route Handlers 平移到 NestJS，保持业务规则（状态机、完成日期维护、热力图聚合）与契约测试一致。
 
@@ -670,9 +719,10 @@
 
 ## 9. 备注区（随手记）
 
-- TODO：是否需要 auth？若课程不要求，可先做“单用户模式”（数据库不加 `userId` 或固定 `userId`）；多用户见 **§3.9**。
+- TODO：是否需要 auth？若课程不要求，可先做“单用户模式”（数据库不加 `userId` 或固定 `userId`）；多用户见 **§3.10**。
 - **Jikan**：阶段 3 优先落地 **后端代理 + §3.8 Cache-Aside（`AnimeMeta`）**；直连模式仅作 fallback。
 - OpenAPI：当前以 `public/swagger.json` 为源 + **`/api-docs`**（Swagger UI）；长期可选 **zod-to-openapi** 等单向生成（实现期再定）。
+- 语言控制系统，我们需要能够管理中文/英文的系统，不然前端页面不统一看着太乱了。番剧因为是从英文数据库爬取的还是保留英文就行
 
 ---
 

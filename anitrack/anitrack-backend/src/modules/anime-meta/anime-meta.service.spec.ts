@@ -1,8 +1,10 @@
 import { Test } from '@nestjs/testing';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { AnimeMetaService } from './anime-meta.service';
 import { AnimeMeta } from './schemas/anime-meta.schema';
+import { BeeService } from '../bee/bee.service';
 
 describe('AnimeMetaService (cache-aside)', () => {
   const malId = 52991;
@@ -27,6 +29,20 @@ describe('AnimeMetaService (cache-aside)', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn().mockReturnValue('https://api.jikan.moe/v4'),
+          },
+        },
+        {
+          provide: CACHE_MANAGER,
+          useValue: {
+            get: jest.fn().mockResolvedValue(undefined),
+            set: jest.fn().mockResolvedValue(true),
+          },
+        },
+        {
+          provide: BeeService,
+          useValue: {
+            getFreshMirror: jest.fn().mockResolvedValue(null),
+            enqueueGeneral: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],

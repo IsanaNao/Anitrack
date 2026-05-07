@@ -12,6 +12,7 @@
 - **下一步**：
   - Timetable：从 mock UI 升级为真实数据（Jikan schedule / 后端聚合 + 缓存）
   - 推荐：从占位升级为每日推荐（Jikan random + Library 标签）
+  - Bee 镜像系统：在开发环境持续镜像 Jikan 元数据到本地 `AnimeMirror`，并逐步让 Schedule/Recommendation 走 Mirror-first
   - Auth：替换 `TEMP_USER_ID`（JWT/Session）
 - **阻塞/风险**：Auth 未接入前，`CurrentUser` 仍会回退到 `TEMP_USER_ID`（技术债，见下）
 - **最后更新时间**：2026-05-07
@@ -115,6 +116,12 @@
 - [ ] 后端新增 `GET /api/anime-meta/schedule`：作为 Jikan 代理 + 缓存（TTL 24h），降低 429 风险
 - [ ] 前端新增 `/schedule` 页面：按周一到周日分组展示（失败态提供“检查 Jikan 服务状态”链接）
 
+### 4.5 Jikan 搜索中转 & 自动化入库（本次会话新增）
+- [x] `GET /api/anime-meta/search?q=...`：后端调用 Jikan V4 Search（limit=5）
+- [x] 搜索结果写入 `AnimeMeta`：bulk upsert（按 `malId` 唯一键），并去重保持顺序
+- [x] 429 限流处理：上游 429 → 后端 429（`UPSTREAM_RATE_LIMIT`）
+- [x] “柔性模式”：`POST /api/anime` 中抓取/读取 `AnimeMeta` 失败不阻断创建，`animeMeta=null` 并记录错误日志
+
 ### 4.6 Dashboard（The Pulse，计划）
 - [x] 激活 Profile & Stats：新增 `GET /api/stats/summary`，Dashboard 顶部展示总量/完成/评分等指标
 - [x] Watching Now：横向滚动流 + onWheel 劫持（区块内垂直滚轮映射为水平滚动），卡片统一 `aspect-[2/3]`、封面 `h-48 object-cover`、进度条
@@ -124,11 +131,14 @@
 ### 4.7 Timetable（新增页面，占位）
 - [x] 新增 `/timetable` 页面：横向滚动的“日期列”时间表 UI（7天/14天切换），数据暂为 mock
 
-### 4.5 Jikan 搜索中转 & 自动化入库（本次会话新增）
-- [x] `GET /api/anime-meta/search?q=...`：后端调用 Jikan V4 Search（limit=5）
-- [x] 搜索结果写入 `AnimeMeta`：bulk upsert（按 `malId` 唯一键），并去重保持顺序
-- [x] 429 限流处理：上游 429 → 后端 429（`UPSTREAM_RATE_LIMIT`）
-- [x] “柔性模式”：`POST /api/anime` 中抓取/读取 `AnimeMeta` 失败不阻断创建，`animeMeta=null` 并记录错误日志
+### 4.8 Bee（Anime Mirror System，后台镜像同步）
+- [x] 新增 `Bee` 模块：`src/modules/bee/*`（Cron + 受控速率抓取）
+- [x] 新增集合 `AnimeMirror`：`malId(unique) + data(JSON) + lastUpdated + source(seasonal/general)`
+- [x] Cron 节奏：每 65 秒执行一次，每次同步 3 个条目（礼貌抓取，带 User-Agent）
+- [x] 断点续爬：基于 `lastUpdated` 选择缺失/过期条目，重启后从 DB 状态继续
+- [x] 数据保鲜：seasonal 3 天 / general 30 天
+- [x] 读路径适配：`AnimeMetaService.getOrFetchByMalId` 先查 mirror（fresh 命中则落 `AnimeMeta`），miss 时再走 Jikan，并被动 enqueue general
+- [x] 开关：`SYNC_ENABLED=true` 时启动后自动 seed `/seasons/now` 并开始静默同步（控制台输出进度）
 
 ---
 
@@ -178,6 +188,7 @@
   - 后端：新增 `GET /api/stats/activity?month=YYYY-MM`（月度 Activity 聚合）与 `GET /api/stats/summary`（Profile/Dashboard 顶部指标）
   - 后端：引入 NestJS `CacheModule`，Jikan 请求统一缓存 24h（彻底缓解 429）
   - 后端：补齐 heatmap 参数校验 e2e（`start > end`、非法 `tz` → 400 错误信封）
+  - 后端：新增 Bee 镜像系统（Cron 受控速率抓取 Jikan → Mongo `AnimeMirror`），并在 `AnimeMetaService` 中实现 Mirror-first
   - 前端：Dashboard “正在观看”改为横向滚动流 + onWheel 映射；AnimeCard 统一比例与进度条；卡片可点击打开编辑 Dialog
   - 前端：Profile Heatmap 增加 Legend；Activity 面板改为后端接口驱动
   - 前端：新增 Timetable 页面（UI 占位）与 Dashboard 底部“新番随机推荐（占位）”

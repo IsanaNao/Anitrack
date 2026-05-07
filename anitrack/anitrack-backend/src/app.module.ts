@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { join } from 'node:path';
@@ -7,12 +8,14 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AnimeModule } from './modules/anime/anime.module';
 import { StatsModule } from './modules/stats/stats.module';
+import { BeeModule } from './modules/bee/bee.module';
 
 @Module({
   imports: [
     CacheModule.register({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       // Be resilient to different working directories (e.g. started from repo root vs backend folder).
@@ -46,6 +49,7 @@ import { StatsModule } from './modules/stats/stats.module';
     }),
     AnimeModule,
     StatsModule,
+    BeeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

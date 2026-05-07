@@ -6,6 +6,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Cache } from 'cache-manager';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
+import { BeeService } from '../bee/bee.service';
 import { AnimeMeta, AnimeMetaDocument } from './schemas/anime-meta.schema';
 import type { JikanPagination } from './dto/anime-meta-search.dto';
 
@@ -41,6 +42,7 @@ export class AnimeMetaService {
     private readonly model: Model<AnimeMetaDocument>,
     private readonly config: ConfigService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    private readonly bee: BeeService,
   ) {}
 
   private jikanBaseUrl() {
@@ -272,6 +274,31 @@ export class AnimeMetaService {
     const existing = await this.model.findOne({ malId });
     if (existing) return existing.toJSON();
 
+    // Mirror-first: if Bee has synced this title recently, prefer local Mongo mirror.
+    const mirrored = await this.bee.getFreshMirror(malId);
+    const mirroredData: any = (mirrored as any)?.data?.data ?? null;
+    if (mirroredData && typeof mirroredData === 'object') {
+      const title = String(mirroredData?.title ?? '').trim();
+      if (title) {
+        const totalEpisodes = mirroredData?.episodes ?? undefined;
+        const genres = this.normalizeGenres(mirroredData?.genres ?? undefined);
+        const created = await this.model.create({
+          malId,
+          title,
+          imageUrl: mirroredData?.images?.jpg?.image_url ?? undefined,
+          episodes: totalEpisodes,
+          totalEpisodes,
+          score: mirroredData?.score ?? undefined,
+          synopsis:
+            typeof mirroredData?.synopsis === 'string'
+              ? mirroredData.synopsis
+              : undefined,
+          genres,
+        });
+        return created.toJSON();
+      }
+    }
+
     const baseUrl = this.jikanBaseUrl();
     const url = `${baseUrl}/anime/${encodeURIComponent(String(malId))}?sfw=true`;
     const json = await this.cachedJikanJson<JikanAnimeResponse>(url);
@@ -298,6 +325,10 @@ export class AnimeMetaService {
       synopsis: typeof data?.synopsis === 'string' ? data.synopsis : undefined,
       genres,
     });
+
+    // Passive enqueue for mirror (general), so restart/resume will eventually cover it.
+    void this.bee.enqueueGeneral(malId);
+
     return created.toJSON();
   }
 }

@@ -331,4 +331,40 @@ export class AnimeMetaService {
 
     return created.toJSON();
   }
+
+  /**
+   * Dashboard / discovery: random **seasonal** titles from `AnimeMirror` (Bee), no Jikan calls.
+   */
+  async randomSeasonalFromMirror(limit: number) {
+    const raw = await this.bee.sampleSeasonalMirrorDocs(limit);
+    const items = raw
+      .map((row) => {
+        const inner = (row as { data?: { data?: Record<string, unknown> } })?.data
+          ?.data as Record<string, unknown> | undefined;
+        if (!inner || typeof inner !== 'object') return null;
+        const malId = Number(row.malId);
+        const title = String(inner.title ?? '').trim();
+        if (!Number.isFinite(malId) || malId <= 0 || !title) return null;
+        const images = inner.images as
+          | { jpg?: { image_url?: string | null } }
+          | undefined;
+        const totalEpisodes = inner.episodes as number | null | undefined;
+        const genres = this.normalizeGenres(
+          inner.genres as Array<{ name?: string | null }> | null | undefined,
+        );
+        return {
+          malId,
+          title,
+          imageUrl: images?.jpg?.image_url ?? undefined,
+          episodes: totalEpisodes ?? undefined,
+          totalEpisodes: totalEpisodes ?? undefined,
+          score: (inner.score as number | null | undefined) ?? undefined,
+          synopsis:
+            typeof inner.synopsis === 'string' ? inner.synopsis : undefined,
+          genres,
+        };
+      })
+      .filter((v): v is NonNullable<typeof v> => Boolean(v));
+    return { items };
+  }
 }

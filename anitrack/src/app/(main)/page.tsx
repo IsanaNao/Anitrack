@@ -2,17 +2,26 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AnimeEntry } from "@/lib/api";
-import { getAnimeEntries, getStatsSummary } from "@/lib/api";
+import {
+  ApiClientError,
+  createAnimeEntry,
+  getAnimeEntries,
+  getSeasonalRandomPicks,
+  getStatsSummary,
+} from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { AnimeCard } from "@/components/AnimeCard";
 import { AnimeEntryDialog } from "@/components/AnimeEntryDialog";
+import { toast } from "sonner";
 
 export default function DashboardPage() {
   const watchingNowRef = useRef<HTMLDivElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<AnimeEntry | null>(null);
+  const [seasonalPickNonce, setSeasonalPickNonce] = useState(0);
+  const queryClient = useQueryClient();
 
   const summary = useQuery({
     queryKey: ["anime", "dashboard", "summary"],
@@ -28,6 +37,36 @@ export default function DashboardPage() {
         pageSize: 8,
         sort: "updatedAt:desc",
       }),
+  });
+
+  const seasonalPicks = useQuery({
+    queryKey: ["anime-meta", "seasonal-random", seasonalPickNonce],
+    queryFn: () => getSeasonalRandomPicks({ limit: 4 }),
+  });
+
+  const addFromRecommend = useMutation({
+    mutationFn: (vars: { malId: number; title: string }) =>
+      createAnimeEntry({ malId: vars.malId, status: "PLANNED" }),
+    onSuccess: (entry) => {
+      void queryClient.invalidateQueries({ queryKey: ["anime"] });
+      const title =
+        entry.animeMeta && typeof entry.animeMeta.title === "string"
+          ? entry.animeMeta.title
+          : `malId: ${entry.malId}`;
+      toast.success("已加入清单", { description: title });
+    },
+    onError: (e: unknown, vars) => {
+      if (
+        e instanceof ApiClientError &&
+        e.status === 409 &&
+        e.details?.some((d) => d.path === "malId")
+      ) {
+        toast.info("已在清单中", { description: vars.title });
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "添加失败";
+      toast.error("添加失败", { description: msg });
+    },
   });
 
   useEffect(() => {
@@ -155,28 +194,63 @@ export default function DashboardPage() {
 
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">新番随机推荐（占位）</div>
+          <div className="text-sm font-semibold">新番随机推荐</div>
           <button
             type="button"
-            disabled
-            className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium text-zinc-400 dark:border-zinc-800 dark:text-zinc-500"
-            title="后续将接入推荐接口"
+            disabled={seasonalPicks.isFetching}
+            onClick={() => {
+              setSeasonalPickNonce((n) => n + 1);
+            }}
+            className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            title="从 Bee 已镜像的当季库中重新抽样（不请求 Jikan）"
           >
-            换一批
+            {seasonalPicks.isFetching ? "加载中…" : "换一批"}
           </button>
         </div>
         <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          这里将展示每日随机推荐的新番（后续接入 Jikan 随机 + Library 标签）。
+          数据来自 MongoDB <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">AnimeMirror</code>{" "}
+          中 <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">tier=seasonal</code>{" "}
+          的已同步条目；读路径不调用 Jikan。
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="aspect-[2/3] w-full rounded-xl border border-dashed border-zinc-300 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/30"
-            />
-          ))}
-        </div>
+        {seasonalPicks.isLoading ? (
+          <div className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">加载中…</div>
+        ) : seasonalPicks.isError ? (
+          <div className="mt-4 text-sm text-red-600 dark:text-red-300">
+            加载失败：{seasonalPicks.error instanceof Error ? seasonalPicks.error.message : "unknown error"}
+          </div>
+        ) : !seasonalPicks.data?.items.length ? (
+          <div className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
+            暂无当季镜像数据。请确认 Bee 已运行（例如环境变量{" "}
+            <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">SYNC_ENABLED=true</code>
+            ）且 <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">/seasons/now</code>{" "}
+            队列已同步到数据库。
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {seasonalPicks.data.items.map((m) => (
+              <div key={m.malId} className="flex flex-col gap-2">
+                <AnimeCard
+                  title={m.title}
+                  imageUrl={m.imageUrl}
+                  malId={m.malId}
+                  genres={m.genres}
+                  totalEpisodes={m.totalEpisodes ?? m.episodes}
+                />
+                <button
+                  type="button"
+                  disabled={addFromRecommend.isPending}
+                  onClick={() => {
+                    addFromRecommend.mutate({ malId: m.malId, title: m.title });
+                  }}
+                  className="h-9 w-full rounded-md border border-zinc-200 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                >
+                  加入清单（PLANNED）
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </AppShell>
   );

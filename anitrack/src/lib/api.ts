@@ -120,6 +120,10 @@ export type AnimeMetaSearchResponse = {
   pagination: JikanPagination;
 };
 
+export type AnimeMetaSeasonalRandomResponse = {
+  items: AnimeMeta[];
+};
+
 export interface AnimeEntry {
   id: string;
   userId: string;
@@ -158,6 +162,17 @@ export async function getAnimeEntries(params?: {
 
   const suffix = qs.size ? `?${qs.toString()}` : "";
   return fetcher<Paginated<AnimeEntry>>(`/anime${suffix}`);
+}
+
+export async function getSeasonalRandomPicks(params?: {
+  limit?: number;
+}): Promise<AnimeMetaSeasonalRandomResponse> {
+  const qs = new URLSearchParams();
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  const suffix = qs.size ? `?${qs.toString()}` : "";
+  return fetcher<AnimeMetaSeasonalRandomResponse>(
+    `/anime-meta/seasonal-random${suffix}`,
+  );
 }
 
 export async function searchAnimeMeta(params: {

@@ -71,8 +71,12 @@ export class BeeService implements OnModuleInit {
   private enabledTopTiers(): Array<'top_1y' | 'top_5y' | 'top_all'> {
     // Allow skipping tiers to avoid triggering rate limits on every startup.
     // Example: BEE_ENABLED_TOP_TIERS=top_5y,top_all
+    // Use `off` / `none` / `false` to disable all /top/anime seeding and rely on
+    // seasonal + quarterly /seasons/{year}/{season} backfill only.
     const raw = String(this.config.get<string>('BEE_ENABLED_TOP_TIERS') ?? '').trim();
     if (!raw) return ['top_1y', 'top_5y', 'top_all'];
+    const low = raw.toLowerCase();
+    if (low === 'off' || low === 'none' || low === 'false' || low === '-') return [];
     const parts = raw
       .split(',')
       .map((s) => s.trim())
@@ -82,6 +86,31 @@ export class BeeService implements OnModuleInit {
       if (p === 'top_1y' || p === 'top_5y' || p === 'top_all') out.push(p);
     }
     return out.length ? out : ['top_1y', 'top_5y', 'top_all'];
+  }
+
+  /** Pause between startup seed steps to reduce burst 429s (0 = disabled). */
+  private seedStaggerMs() {
+    const n = Number(this.config.get<string>('BEE_SEED_STAGGER_MS'));
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 120_000) : 0;
+  }
+
+  private async sleepSeedStagger() {
+    const ms = this.seedStaggerMs();
+    if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+  }
+
+  /** Tiers that must be fully mirrored before we enqueue the next backfill season. */
+  private highPriorityMirrorTiers(): Array<'seasonal' | 'top_1y' | 'top_5y' | 'top_all'> {
+    const tiers: Array<'seasonal' | 'top_1y' | 'top_5y' | 'top_all'> = ['seasonal'];
+    for (const t of this.enabledTopTiers()) tiers.push(t);
+    return tiers;
+  }
+
+  private async countPendingHighPriorityMirrors(): Promise<number> {
+    return this.mirrorModel.countDocuments({
+      tier: { $in: this.highPriorityMirrorTiers() },
+      $or: [{ data: { $exists: false } }, { lastUpdated: { $exists: false } }],
+    });
   }
 
   private jikanBaseUrl() {
@@ -138,18 +167,21 @@ export class BeeService implements OnModuleInit {
     await seed('seasonal', () => this.seedSeasonalQueue());
     const enabled = new Set(this.enabledTopTiers());
     if (enabled.has('top_1y')) {
+      await this.sleepSeedStagger();
       await seed('top_1y', async () => {
         await this.seedTierTop({ count: 40, tier: 'top_1y', priority: 10 });
         await this.markTopSeeded('top_1y');
       });
     }
     if (enabled.has('top_5y')) {
+      await this.sleepSeedStagger();
       await seed('top_5y', async () => {
         await this.seedTierTop({ count: 100, tier: 'top_5y', priority: 20 });
         await this.markTopSeeded('top_5y');
       });
     }
     if (enabled.has('top_all')) {
+      await this.sleepSeedStagger();
       await seed('top_all', async () => {
         await this.seedTierTop({ count: 200, tier: 'top_all', priority: 30 });
         await this.markTopSeeded('top_all');
@@ -190,8 +222,13 @@ export class BeeService implements OnModuleInit {
   }
 
   private async allTopTiersSeeded() {
+    const need = this.enabledTopTiers();
+    if (!need.length) return true;
     const v = await this.getSeededTops();
-    return Boolean(v.top_1y && v.top_5y && v.top_all);
+    for (const t of need) {
+      if (!v[t]) return false;
+    }
+    return true;
   }
 
   async seedRetryStep() {
@@ -484,11 +521,8 @@ export class BeeService implements OnModuleInit {
     // Prevent premature backfill if some top tiers were not seeded due to rate limiting.
     if (!(await this.allTopTiersSeeded())) return;
 
-    // Only start backfill when higher-priority tiers are fully synced at least once.
-    const pendingHigh = await this.mirrorModel.countDocuments({
-      priority: { $lte: 30 },
-      $or: [{ data: { $exists: false } }, { lastUpdated: { $exists: false } }],
-    });
+    // Only start backfill when enabled high-priority tiers are fully synced at least once.
+    const pendingHigh = await this.countPendingHighPriorityMirrors();
     if (pendingHigh > 0) return;
 
     const cur = await this.stateModel.findOne({ key: BACKFILL_STATE_KEY }).lean();
@@ -593,6 +627,25 @@ export class BeeService implements OnModuleInit {
     if (!doc?.data) return null;
     if (this.isStale({ tier: doc.tier, lastUpdated: doc.lastUpdated })) return null;
     return doc;
+  }
+
+  /**
+   * Random picks from mirrored **seasonal** tier only (Bee `/seasons/now` queue).
+   * Read path for recommendations: **no Jikan HTTP** — requires documents with `data` already synced.
+   */
+  async sampleSeasonalMirrorDocs(size: number) {
+    const n = Math.max(1, Math.min(25, Math.floor(size) || 1));
+    return this.mirrorModel.aggregate<{ malId: number; data: unknown }>([
+      {
+        $match: {
+          tier: 'seasonal',
+          malId: { $gt: 0 },
+          data: { $exists: true, $ne: null },
+        },
+      },
+      { $sample: { size: n } },
+      { $project: { _id: 0, malId: 1, data: 1 } },
+    ]);
   }
 
   private async fetchJikanJson<T>(url: string): Promise<T> {

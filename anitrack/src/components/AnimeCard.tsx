@@ -25,7 +25,8 @@ export function AnimeCard({
 }: {
   title: string;
   imageUrl?: string;
-  status: AnimeEntry["status"];
+  /** 未传入时不展示追番状态徽章（例如镜像推荐卡片） */
+  status?: AnimeEntry["status"];
   malId: number;
   genres?: string[];
   totalEpisodes?: number;
@@ -86,13 +87,15 @@ export function AnimeCard({
           </div>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
-              status,
-            )}`}
-          >
-            {status}
-          </span>
+          {status ? (
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
+                status,
+              )}`}
+            >
+              {status}
+            </span>
+          ) : null}
           <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
             malId: {malId}
           </span>

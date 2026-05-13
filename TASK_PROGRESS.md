@@ -7,12 +7,12 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：阶段 5+（增量交付）：Dashboard “The Pulse” 局部激活 + Profile 统计后端化 + Timetable UI 占位页
-- **正在做**：—（最近一次：Dashboard 当季推荐已改为 Bee `AnimeMirror` 纯库读路径）
+- **当前阶段**：阶段 5+（增量交付）：Dashboard / Profile / Library 成熟；**Timetable 已接真实 API**；**播出钟点 TBD** 暂缓（待数据源或产品策略）
+- **正在做**：—（文档同步：记录 Timetable 契约与已知限制）
 - **下一步**：
-  - Timetable：从 mock UI 升级为真实数据（Jikan schedule / 后端聚合 + 缓存）
+  - **Timetable 播出时间**：在 Bangumi/Jikan 侧有可靠 `airTime` 或备选字段前保持 **TBD** 空态可接受；后续可评估 subject 补全、二次 enrich、或 Jikan broadcast 解析等
   - 推荐：在现有「镜像 `$sample` 随机当季」基础上，可选升级为每日个性化（结合 `AnimeEntry` / 标签偏好等；读路径仍以 Mirror 为主）
-  - Bee 镜像系统：在开发环境持续镜像 Jikan 元数据到 Atlas `AnimeMirror`；Schedule 等能力继续 Mirror-first 收口
+  - Bee 镜像系统：在开发环境持续镜像 Jikan 元数据到 Atlas `AnimeMirror`；Bangumi 映射 / enrich 继续跑通映射覆盖率
   - Auth：替换 `TEMP_USER_ID`（JWT/Session）
 - **阻塞/风险**：Auth 未接入前，`CurrentUser` 仍会回退到 `TEMP_USER_ID`（技术债，见下）
 - **最后更新时间**：2026-05-13
@@ -113,8 +113,8 @@
 - [x] Legend：为 intensity 0-4 增加颜色图例
 
 ### 4.4 Seasonal Schedule（Jikan）
-- [ ] 后端新增 `GET /api/anime-meta/schedule`：作为 Jikan 代理 + 缓存（TTL 24h），降低 429 风险
-- [ ] 前端新增 `/schedule` 页面：按周一到周日分组展示（失败态提供“检查 Jikan 服务状态”链接）
+- [ ] 后端可选 `GET /api/anime-meta/schedule`：若需要「纯 Jikan 放送表」视图，可作为与现行 Bangumi 驱动 Timetable **并存**的第二条读路径（需缓存与 429 策略）
+- [ ] 前端可选 `/schedule` 页面：按周一到周日分组展示（与 `/timetable` 按日历分列不同）
 
 ### 4.5 Jikan 搜索中转 & 自动化入库（本次会话新增）
 - [x] `GET /api/anime-meta/search?q=...`：后端调用 Jikan V4 Search（limit=5）
@@ -129,8 +129,11 @@
 - [x] Dashboard「新番随机推荐」：`GET /api/anime-meta/seasonal-random` 从 `AnimeMirror`（`tier=seasonal`）`$sample` 抽样，**读路径不调用 Jikan**；前端换一批 + 加入清单（Sonner 成功/重复/错误提示）
 - [ ] 推荐增强（可选）：每日个性化 / Library 标签加权等
 
-### 4.7 Timetable（新增页面，占位）
-- [x] 新增 `/timetable` 页面：横向滚动的“日期列”时间表 UI（7天/14天切换），数据暂为 mock
+### 4.7 Timetable（新番时间表）
+- [x] 后端：`GET /api/anime-meta/timetable?days=` — `AnimeMirror`（`tier=seasonal`，已映射 `bgmId` + `bangumi.weekday`）按柏林日历日分列；东京墙钟 → `Europe/Berlin`（`timetable.util`）；条目含 `synopsisEn`/`synopsisJa`（Jikan 镜像）、`episodeLabel: "Seasonal"`、标题英文优先
+- [x] 后端：`normalizeBangumiWallClock`（`HH:mm` / `HHmm`）+ 写入/读取链路；**仍有不少条目无 `airTimeLocal`（前端 TBD）** — **暂缓专项**
+- [x] 前端：`/timetable` 真实数据、横向日期列、7/14 天、点击 **`TimetableItemDetailDialog`**（修复 Bangumi ID 展示）；追更 `POST /api/anime`；已移除「番剧索引」占位
+- [ ] **后续**：可靠播出钟点（上游 enrich、或备选数据源）
 
 ### 4.8 Bee（Anime Mirror System，后台镜像同步）
 - [x] 新增 `Bee` 模块：`src/modules/bee/*`（Cron + 受控速率抓取）
@@ -141,6 +144,7 @@
 - [x] 数据保鲜（按 tier）：seasonal 7 天 / top40 30 天 / top100 60 天 / top200 180 天 / backfill 60 天
 - [x] 多级优先级：seasonal ＞ top40 ＞ top100 ＞ top200 ＞ 季度回滚 backfill（全部跑满后才启动回滚）
 - [x] 读路径适配：`AnimeMetaService.getOrFetchByMalId` 先查 mirror（fresh 命中则落 `AnimeMeta`），miss 时再走 Jikan，并被动 enqueue general
+- [x] **Bangumi**：`tryBangumiMapSeasonal` + `enrichBangumiSubject` — 日历匹配写入 `bgmId` / `titles` / `bangumi.weekday` / `airTime`（规范化）；时间表依赖此数据链
 - [x] 推荐读路径：`AnimeMirror` 当季随机抽样接口（见上 4.6），与 `getOrFetchByMalId` 的 Mirror-first 互补
 - [x] 开关：`SYNC_ENABLED=true` 时启动后自动 seed `/seasons/now` 并开始静默同步（控制台输出进度）
 - [x] Seed 重试：每 30 分钟低频重试播种 top tiers（upsert，不会重复写入），避免启动时短暂 429 导致 tier 不完整
@@ -200,7 +204,12 @@
   - 后端：新增 Bee 镜像系统（Cron 受控速率抓取 Jikan → Mongo `AnimeMirror`），并在 `AnimeMetaService` 中实现 Mirror-first
   - 前端：Dashboard “正在观看”改为横向滚动流 + onWheel 映射；AnimeCard 统一比例与进度条；卡片可点击打开编辑 Dialog
   - 前端：Profile Heatmap 增加 Legend；Activity 面板改为后端接口驱动
-  - 前端：新增 Timetable 页面（UI 占位）与 Dashboard 底部“新番随机推荐（占位）”
+  - 前端：新增 `/timetable` 页面骨架（后于 **2026-05-13** 接真实 `GET /api/anime-meta/timetable`）；Dashboard 底部「新番随机推荐」后接 `seasonal-random`
+
+- **2026-05-13（Timetable 真实数据 + 文档同步）**：
+  - 后端：`GET /api/anime-meta/timetable` — Bangumi 星期驱动 + 柏林时区；`normalizeBangumiWallClock`；条目 `synopsisEn`/`synopsisJa`、英文优先 `title`
+  - 前端：`/timetable` 接 API；详情 Dialog；移除「番剧索引」
+  - **暂缓**：多数条目 **播出钟点 TBD**（`airTimeLocal`），待后续数据源/策略；`PROJECT_BLUEPRINT` / `README` / 本文档已记录
 
 - **2026-05-13（Dashboard 当季推荐：Mirror-only）**：
   - 后端：`GET /api/anime-meta/seasonal-random?limit=` — 对 `AnimeMirror` 中 `tier=seasonal` 且已写入 `data` 的文档做 MongoDB `$sample`，映射为 `AnimeMeta` 形状；**该接口不发起 Jikan HTTP**
@@ -211,6 +220,7 @@
 ## 9. 技术债务（Tech Debt）
 
 - **TEMP_USER_ID**：仍作为 dev fallback 存在；但已通过 `@CurrentUser()` 装饰器集中收口。接入 Auth 后应把 `CurrentUser` 的来源替换为 token/session 注入的真实 user id
+- **Timetable `airTimeLocal`**：大量条目仍为 **TBD**（Bangumi/Jikan 侧播出字段不完整或映射未覆盖）；已做 `airTime` 字符串规范化，**完整排钟待专项**
 - **索引迁移风险**：旧集合上可能残留 `{ malId: 1 } unique` 索引会阻止新结构插入  
   - 已在服务启动时调用 `this.animeEntryModel.syncIndexes()`（无 DB 时跳过）  
   - 若 Atlas 上仍异常，建议在网页端 **Drop `animeentries` collection** 后重启，让新索引干净重建

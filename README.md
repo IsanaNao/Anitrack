@@ -26,6 +26,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
 - **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
+- **新番时间表（Timetable）**：前端 **`/timetable`** 对接 **`GET /api/anime-meta/timetable`**（7/14 天、`Europe/Berlin` 日期列）；数据来自 **当季 `AnimeMirror` + Bangumi 映射**（非 Jikan schedule 直连）。条目可点开详情并 **加入清单（PLANNED / WATCHING）** 或编辑已有条目。**已知限制**：部分条目 **播出钟点仍显示 TBD**（`airTimeLocal` 依赖上游 `airTime` 等字段，已做格式规范化，完整排期待后续方案）。
 - **🐝 Intelligent Data Mirroring（Bee System）**：
   - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
   - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
@@ -60,7 +61,8 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - [x] 阶段 1：核心 Watchlist CRUD 与数据库持久化
 - [x] 阶段 2：统计聚合逻辑与多维自动化测试
 - [x] 阶段 3：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发（Dashboard/The Pulse、Profile Heatmap、Library Dialog）
-- [ ] 阶段 4（进行中）：Timetable 仍为 mock；**Dashboard 当季推荐**已对接 `GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，无 Jikan 读路径）；用户认证与多用户数据隔离待办
+- [x] 阶段 4（进行中收尾）：**`/timetable` 新番时间表**已对接后端 **`GET /api/anime-meta/timetable`**（Bangumi 驱动，非 mock）；Dashboard 当季推荐已对接 **`GET /api/anime-meta/seasonal-random`**（`AnimeMirror` / `$sample`，无 Jikan 读路径）
+- [ ] 阶段 5+：**Timetable 播出钟点**在数据不全时仍为 **TBD**（暂缓，待数据源或策略）；用户认证与多用户数据隔离；可选整站 i18n
 
 ## 🛠 快速开始（给队友）
 

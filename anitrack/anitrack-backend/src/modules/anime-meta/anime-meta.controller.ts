@@ -1,4 +1,4 @@
-import { Controller, Get, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
+import { Controller, Get, Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
 import { AnimeMetaService } from './anime-meta.service';
 import { AnimeMetaSearchQueryDto } from './dto/anime-meta-search.dto';
@@ -31,5 +31,13 @@ export class AnimeMetaController {
   ) {
     const capped = Math.min(12, Math.max(1, limit));
     return this.animeMeta.randomSeasonalFromMirror(capped);
+  }
+
+  /** 周视图时间表：`Europe/Berlin`（CEST/CET）展示；数据来自已映射 Bangumi 的当季镜像。 */
+  @Get('timetable')
+  async timetable(
+    @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
+  ) {
+    return this.animeMeta.getTimetable(days);
   }
 }

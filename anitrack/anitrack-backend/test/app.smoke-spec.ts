@@ -52,6 +52,19 @@ describe('NestJS backend smoke (e2e)', () => {
           episodes: 1,
           score: 8.8,
         }),
+        randomSeasonalFromMirror: async () => ({ items: [] }),
+        getTimetable: async () => ({
+          timezone: 'Europe/Berlin',
+          days: [],
+        }),
+        searchAndUpsert: async () => ({
+          items: [],
+          pagination: {
+            current_page: 1,
+            has_next_page: false,
+            last_visible_page: 1,
+          },
+        }),
       })
       .compile();
 
@@ -88,6 +101,15 @@ describe('NestJS backend smoke (e2e)', () => {
     if (mongoose.connection.readyState === 1) {
       await mongoose.connection.db?.dropDatabase();
     }
+  });
+
+  it('timetable: GET /api/anime-meta/timetable returns timezone + days[]', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/anime-meta/timetable?days=7')
+      .expect(200);
+
+    expect(res.body).toHaveProperty('timezone', 'Europe/Berlin');
+    expect(Array.isArray(res.body.days)).toBe(true);
   });
 
   it('heatmap contract: GET /api/stats/heatmap returns start/end/months[]', async () => {

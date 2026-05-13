@@ -33,5 +33,23 @@ export class BeeController {
     await this.bee.syncBatch(n);
     return this.bee.progressSnapshot();
   }
+
+  @Get('bangumi-mapping')
+  @ApiOperation({
+    summary:
+      'Bangumi ↔ MAL mapping snapshot (Mongo counts only). Use to verify mapping without reading logs.',
+  })
+  async bangumiMapping() {
+    return this.bee.bangumiMappingSnapshot();
+  }
+
+  @Post('bangumi-map')
+  @ApiOperation({
+    summary:
+      'Run Bangumi title-mapping pass once (calendar + v0 subject). Returns updated snapshot.',
+  })
+  async bangumiMapNow() {
+    return this.bee.triggerBangumiMapNow();
+  }
 }
 

@@ -2,8 +2,17 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { BangumiService } from '../bangumi/bangumi.service';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
+import {
+  flattenBangumiCalendar,
+  jikanTitlesFromMirrorData,
+  normalizeBangumiWallClock,
+  pickBangumiTitleMatch,
+  stripHtmlSummary,
+} from './bee-mapping.util';
 import { AnimeMirror, AnimeMirrorDocument } from './schemas/anime-mirror.schema';
+import { ApiMapping, ApiMappingDocument } from './schemas/api-mapping.schema';
 import { BeeState, BeeStateDocument } from './schemas/bee-state.schema';
 
 type JikanSeasonNowResponse = {
@@ -58,14 +67,22 @@ export class BeeService implements OnModuleInit {
   constructor(
     @InjectModel(AnimeMirror.name)
     private readonly mirrorModel: Model<AnimeMirrorDocument>,
+    @InjectModel(ApiMapping.name)
+    private readonly apiMappingModel: Model<ApiMappingDocument>,
     @InjectModel(BeeState.name)
     private readonly stateModel: Model<BeeStateDocument>,
     private readonly config: ConfigService,
+    private readonly bangumi: BangumiService,
   ) {}
 
   private syncEnabled() {
     const v = String(this.config.get<string>('SYNC_ENABLED') ?? '').trim();
     return v.toLowerCase() === 'true' || v === '1' || v.toLowerCase() === 'yes';
+  }
+
+  private bangumiEnabled() {
+    const v = String(this.config.get<string>('BANGUMI_ENABLED') ?? 'true').trim();
+    return !(v === '0' || v.toLowerCase() === 'false' || v.toLowerCase() === 'off');
   }
 
   private enabledTopTiers(): Array<'top_1y' | 'top_5y' | 'top_all'> {
@@ -313,6 +330,10 @@ export class BeeService implements OnModuleInit {
 
     await this.mirrorModel.bulkWrite(ops, { ordered: false });
     this.log.log(`[Mirror] Seasonal queue seeded: ${malIds.length} titles`);
+
+    void this.tryBangumiMapSeasonal().catch((e: any) =>
+      this.log.warn(`[Bee] Bangumi map after seasonal seed: ${e?.message ?? e}`),
+    );
   }
 
   async seedTierTop(args: {
@@ -504,6 +525,54 @@ export class BeeService implements OnModuleInit {
     return { tiers: out, backoffUntil };
   }
 
+  /** 供排障：Bangumi ↔ MAL 映射与当季镜像覆盖情况（只读 Mongo，不请求外网）。 */
+  async bangumiMappingSnapshot() {
+    const [
+      seasonalTotal,
+      seasonalWithData,
+      seasonalWithBgmId,
+      seasonalWithSummaryCn,
+      apiMappingTotal,
+    ] = await Promise.all([
+      this.mirrorModel.countDocuments({ tier: 'seasonal' }),
+      this.mirrorModel.countDocuments({
+        tier: 'seasonal',
+        data: { $exists: true, $ne: null },
+      }),
+      this.mirrorModel.countDocuments({
+        tier: 'seasonal',
+        bgmId: { $exists: true, $ne: null },
+      }),
+      this.mirrorModel.countDocuments({
+        tier: 'seasonal',
+        'bangumi.summaryCn': { $exists: true, $ne: '' },
+      }),
+      this.apiMappingModel.countDocuments({}),
+    ]);
+
+    return {
+      bangumiEnabled: this.bangumiEnabled(),
+      seasonal: {
+        totalQueued: seasonalTotal,
+        withJikanData: seasonalWithData,
+        withBgmId: seasonalWithBgmId,
+        withSummaryCn: seasonalWithSummaryCn,
+      },
+      apiMappings: apiMappingTotal,
+      hints: [
+        'withBgmId > 0 表示至少部分当季条目已通过标题匹配挂上 Bangumi id。',
+        'withSummaryCn 表示已拉到 v0 subject 并写入中文简介字段。',
+        '手动触发映射：POST /api/bee/bangumi-map（会请求 Bangumi；建议日历缓存命中后再调）。',
+      ],
+    };
+  }
+
+  /** 手动触发一次 Bangumi 映射（与定时任务相同逻辑）。 */
+  async triggerBangumiMapNow() {
+    await this.tryBangumiMapSeasonal();
+    return this.bangumiMappingSnapshot();
+  }
+
   private async progressSummary() {
     const snap = await this.progressSnapshot();
     const fmt = (k: string, v: { done: number; total: number }) =>
@@ -646,6 +715,166 @@ export class BeeService implements OnModuleInit {
       { $sample: { size: n } },
       { $project: { _id: 0, malId: 1, data: 1 } },
     ]);
+  }
+
+  /**
+   * 将当季 `AnimeMirror` 与 Bangumi `/calendar` 做标题匹配，写入 `ApiMapping` 与 `bgmId/titles`，
+   * 并拉取 v0 subject 丰富 `bangumi.summaryCn`、播出字段。
+   */
+  async tryBangumiMapSeasonal() {
+    if (!this.bangumiEnabled()) return;
+
+    try {
+      const calendar = await this.bangumi.getCalendarCached();
+      const rows = flattenBangumiCalendar(calendar);
+      if (!rows.length) {
+        this.log.warn('[Bee] Bangumi calendar produced no rows');
+        return;
+      }
+
+      const mirrors = await this.mirrorModel
+        .find({
+          tier: 'seasonal',
+          data: { $exists: true, $ne: null },
+        })
+        .lean()
+        .limit(220);
+
+      let mapped = 0;
+      let enriched = 0;
+
+      for (const doc of mirrors) {
+        const malId = Number(doc.malId);
+        if (!Number.isFinite(malId) || malId <= 0) continue;
+
+        if (doc.bgmId) {
+          if (!doc.bangumi?.summaryCn) {
+            try {
+              await this.enrichBangumiSubject(malId, Number(doc.bgmId));
+              enriched += 1;
+            } catch (e: any) {
+              this.log.warn(`[Bee] enrich malId=${malId}: ${e?.message ?? e}`);
+            }
+          }
+          continue;
+        }
+
+        const jt = jikanTitlesFromMirrorData(doc.data);
+        const pick = pickBangumiTitleMatch(jt, rows);
+        if (!pick?.item?.id) continue;
+
+        const bgmId = Number(pick.item.id);
+        if (!Number.isFinite(bgmId) || bgmId <= 0) continue;
+
+        const taken = await this.apiMappingModel.findOne({ bgmId }).lean();
+        if (taken && Number(taken.malId) !== malId) continue;
+
+        try {
+          await this.apiMappingModel.updateOne(
+            { malId },
+            { $set: { malId, bgmId, lastMapped: new Date() } },
+            { upsert: true },
+          );
+        } catch (e: any) {
+          if (e?.code === 11000) {
+            this.log.warn(`[Bee] skip malId=${malId} bgmId=${bgmId} (mapping duplicate)`);
+            continue;
+          }
+          throw e;
+        }
+
+        const titleJp = typeof pick.item.name === 'string' ? pick.item.name : '';
+        const titleCn =
+          typeof pick.item.name_cn === 'string' && pick.item.name_cn.trim()
+            ? pick.item.name_cn.trim()
+            : titleJp;
+        const titleEn =
+          typeof pick.item.name_en === 'string' && pick.item.name_en.trim()
+            ? pick.item.name_en.trim()
+            : '';
+
+        const display = titleCn || titleJp || String(bgmId);
+
+        const wallClock = normalizeBangumiWallClock(
+          typeof pick.item.time === 'string' ? pick.item.time : undefined,
+        );
+
+        await this.mirrorModel.updateOne(
+          { malId },
+          {
+            $set: {
+              bgmId,
+              titles: { cn: titleCn, jp: titleJp, en: titleEn },
+              bangumi: {
+                weekday: pick.bucketWeekday ?? pick.item.air_weekday,
+                airTime: wallClock,
+              },
+            },
+          },
+        );
+
+        this.log.log(`[Bee] Mapped MAL:${malId} to BGM:${bgmId} (${display})`);
+        mapped += 1;
+
+        try {
+          await this.enrichBangumiSubject(malId, bgmId);
+          enriched += 1;
+        } catch (e: any) {
+          this.log.warn(`[Bee] enrich after map malId=${malId}: ${e?.message ?? e}`);
+        }
+      }
+
+      if (mapped > 0 || enriched > 0) {
+        this.log.log(`[Bee] Bangumi map pass: newMappings=${mapped}, enrich=${enriched}`);
+      }
+    } catch (e: any) {
+      if (e instanceof ApiErrorException && e.getStatus() === 429) {
+        this.log.warn(`[Bee] Bangumi map: ${e.userMessage}`);
+        return;
+      }
+      this.log.warn(`[Bee] Bangumi map failed: ${e?.message ?? e}`);
+    }
+  }
+
+  private async enrichBangumiSubject(malId: number, bgmId: number) {
+    const sub = await this.bangumi.getSubjectV0Cached(bgmId);
+    const summaryRaw = typeof sub.summary === 'string' ? sub.summary : '';
+    const summaryCn = summaryRaw ? stripHtmlSummary(summaryRaw) : undefined;
+
+    const airWeekday =
+      typeof sub.air_weekday === 'number'
+        ? sub.air_weekday
+        : typeof (sub as { airweekday?: unknown }).airweekday === 'number'
+          ? Number((sub as { airweekday?: number }).airweekday)
+          : undefined;
+
+    const airTimeRaw =
+      typeof (sub as { time?: unknown }).time === 'string'
+        ? String((sub as { time?: string }).time)
+        : typeof (sub as { air_time?: unknown }).air_time === 'string'
+          ? String((sub as { air_time?: string }).air_time)
+          : undefined;
+    const airTimeNorm = normalizeBangumiWallClock(airTimeRaw);
+
+    const cur = await this.mirrorModel.findOne({ malId }).lean();
+    const prevB = (cur?.bangumi ?? {}) as {
+      weekday?: number;
+      airTime?: string;
+      summaryCn?: string;
+    };
+
+    const merged = {
+      ...prevB,
+      summaryCn: summaryCn ?? prevB.summaryCn,
+      weekday: typeof airWeekday === 'number' ? airWeekday : prevB.weekday,
+      airTime:
+        airTimeNorm ??
+        normalizeBangumiWallClock(prevB.airTime) ??
+        prevB.airTime,
+      detailFetchedAt: new Date().toISOString(),
+    };
+
+    await this.mirrorModel.updateOne({ malId }, { $set: { bangumi: merged } });
   }
 
   private async fetchJikanJson<T>(url: string): Promise<T> {

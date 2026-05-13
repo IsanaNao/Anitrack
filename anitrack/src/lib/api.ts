@@ -124,6 +124,35 @@ export type AnimeMetaSeasonalRandomResponse = {
   items: AnimeMeta[];
 };
 
+export type TimetableItemApi = {
+  malId: number;
+  bgmId: number;
+  /** 英文优先（来自 Bangumi `name_en` / Jikan `title_english` 等），供时间表页展示 */
+  title: string;
+  titleJp?: string;
+  titleEn?: string;
+  imageUrl?: string;
+  airTimeLocal?: string;
+  nextAirAtIso?: string;
+  /** Jikan 简介，多为英文 */
+  synopsisEn?: string;
+  /** 以假名为主的简介（来自 Jikan synopsis 启发式分类） */
+  synopsisJa?: string;
+  episodeLabel: string;
+};
+
+export type TimetableDayApi = {
+  date: string;
+  dateLabel: string;
+  weekdayLabel: string;
+  items: TimetableItemApi[];
+};
+
+export type TimetableResponse = {
+  timezone: string;
+  days: TimetableDayApi[];
+};
+
 export interface AnimeEntry {
   id: string;
   userId: string;
@@ -173,6 +202,15 @@ export async function getSeasonalRandomPicks(params?: {
   return fetcher<AnimeMetaSeasonalRandomResponse>(
     `/anime-meta/seasonal-random${suffix}`,
   );
+}
+
+export async function getTimetable(params?: {
+  days?: number;
+}): Promise<TimetableResponse> {
+  const qs = new URLSearchParams();
+  if (params?.days != null) qs.set("days", String(params.days));
+  const suffix = qs.size ? `?${qs.toString()}` : "";
+  return fetcher<TimetableResponse>(`/anime-meta/timetable${suffix}`);
 }
 
 export async function searchAnimeMeta(params: {

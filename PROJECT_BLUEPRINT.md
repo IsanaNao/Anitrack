@@ -36,14 +36,14 @@
   - 删除条目
   - 列表查询（按状态筛选、分页/排序）
 
-### 1.2 Seasonal Schedule（集成外部 API）
-集成 **Jikan API**，展示当前季度番剧更新时间表（前端展示，后端可选做缓存代理）。
+### 1.2 Seasonal Schedule / 新番时间表（集成外部数据）
+现行实现以 **Bee `AnimeMirror`（当季 Jikan 镜像）+ Bangumi 映射** 为主，而非单独依赖 Jikan 的 schedule 端点：
 
-- **展示重点**：
-  - 按星期/更新时间分组
-  - 显示标题、封面、播出信息、外链
+- **后端**：`GET /api/anime-meta/timetable?days=7|14` — 读取已映射 `bgmId` 且含 `bangumi.weekday` 的当季镜像，按 Bangumi 星期桶与东京墙钟换算为 **`Europe/Berlin`** 本地日期列（详见 **§3.8.6**）。
+- **前端**：`/timetable` — 横向日期列、条目卡片、倒计时；点击条目打开详情并可 **加入清单（PLANNED / WATCHING）** 或跳转已有条目的 `AnimeEntryDialog`；**不**再做「番剧索引」占位 Tab。
+- **展示语言（时间表域）**：接口层对标题采用 **英文优先**（Bangumi `name_en` / Jikan `title_english` → 日文 → 中文兜底）；简介字段为 **`synopsisEn` / `synopsisJa`**（来自 Jikan `synopsis` 的轻量脚本分类），便于后续整站 i18n。
 
-> **实现状态（当前基线）**：已新增前端页面 `/timetable`（UI 占位，数据为 mock）。下一步将按“Jikan schedule → 后端聚合 + 24h 缓存 → 前端按日期/星期分列”的路径落地真实数据。
+> **暂缓（已知缺口）**：不少条目在 UI 上仍显示 **播出钟点 TBD**（`airTimeLocal` 为空）。已对 Bangumi `time` 做 **`HH:mm` / `HHmm` 规范化** 与入库归一，但若上游无可靠 `airTime`、或需额外数据源（例如更完整的 subject / 放送表），**排期展示仍待后续方案**，当前不阻塞其余功能交付。
 
 ### 1.3 Anime Heatmap（Highlight：绿墙）
 基于用户追番行为，生成类似 GitHub contributions 的“人生纸格”（按月）。
@@ -351,6 +351,20 @@
 - **响应**：`{ items: [...] }`，单项字段与 `AnimeMeta` 展示模型对齐（`malId/title/imageUrl/score/genres/totalEpisodes/...`）
 - **空数据**：若当季镜像尚未写入或仍在同步中，可能返回 `items: []`（前端应展示空态与 Bee 运行提示）
 
+#### 3.8.6 新番时间表（`GET /api/anime-meta/timetable`）
+
+> 读路径：**不调用 Jikan HTTP**（依赖 `AnimeMirror` 中已写入的 `data` + Bee 维护的 Bangumi 字段）。
+
+- **Endpoint**：`GET /api/anime-meta/timetable?days=`（`days` 默认 7，最大 14）
+- **过滤条件（Mongo）**：`tier=seasonal`、`malId>0`、`bgmId` 存在、`bangumi.weekday` 为数字（与 Bangumi 日历桶一致）
+- **响应**：`{ timezone: "Europe/Berlin", days: [ { date, dateLabel, weekdayLabel, items[] } ] }`
+- **单项 `items[]`（要点）**：
+  - `malId` / `bgmId`、`imageUrl`（来自镜像内 Jikan payload）
+  - `title`：英文优先显示串；`titleJp` / `titleEn`：多语言快照
+  - `airTimeLocal` / `nextAirAtIso`：由 `bangumi.airTime`（东京墙钟）+ 列日期换算；缺失则为空（前端显示 **TBD**）
+  - `synopsisEn` / `synopsisJa`：来自 Jikan 镜像 `synopsis`（非 Bangumi 中文简介）
+  - `episodeLabel`：当前为 **`Seasonal`**（当季条目标记）
+
 ---
 
 ### 3.9 Bee：Anime Mirror System（Cron 镜像同步）
@@ -379,6 +393,9 @@ anitrack-backend/src/modules/bee/
 - `source: 'seasonal' | 'general'`
 - `tier: 'seasonal' | 'top_1y' | 'top_5y' | 'top_all' | 'backfill'`（抓取梯队）
 - `priority: number`（越小优先级越高）
+- **`bgmId`（可选）**：Bangumi `subject_id`；与 `ApiMapping` 对齐，用于日历匹配与 enrich
+- **`titles`（可选）**：`{ cn?, jp?, en? }` — 标题多语言快照（时间表英文优先展示依赖此结构 + Jikan `title_english`）
+- **`bangumi`（可选）**：`weekday`（1–7）、`airTime`（规范化为 `HH:mm` 的东京墙钟）、`summaryCn`（Bangumi subject 摘要，供其他能力）、`detailFetchedAt` 等
 
 #### 3.9.3 调度节奏（避免 60 秒边界）
 - **每 65 秒**执行一次
@@ -426,6 +443,14 @@ anitrack-backend/src/modules/bee/
 3. 到 `backoffUntil` 后，可手动触发一次轻量播种：
    - `POST /api/bee/seed-step`
 4. 播种成功后应看到 `top_5y.total=100`、`top_all.total=200`，随后 tick 日志会开始出现 `top_5y=3` / `top_all=3` 的同步记录。
+
+#### 3.9.11 Bangumi 映射与 subject enrich（时间表数据链）
+
+> 目标：为当季 `AnimeMirror` 找到 **Bangumi 条目**，写入 **`bgmId` + 放送星期 +（尽力）播出时刻**，并可选拉取 subject 详情。
+
+- **入口**：Bee 服务内 `tryBangumiMapSeasonal()`（由 Cron 周期触发）：拉取 Bangumi `/calendar` 扁平化后与 Jikan 标题做模糊匹配，命中则 `upsert` **`ApiMapping(malId, bgmId)`** 并更新镜像上的 `titles` / `bangumi.weekday` / `bangumi.airTime`。
+- **Enrich**：`enrichBangumiSubject(malId, bgmId)` 拉取 Bangumi v0 subject，合并 `summaryCn`、`air_weekday`、`time`/`air_time` 等；`airTime` 写入前经 **`normalizeBangumiWallClock`**（兼容 `2330` → `23:30`）。
+- **与 §3.8.6 的关系**：时间表 API **只消费**镜像中已存在的 `bangumi.*` + `data`；映射未覆盖或上游无播出时刻时，对应列仍无 `airTimeLocal`（前端 **TBD**，见 **§1.2 暂缓说明**）。
 
 ---
 
@@ -701,8 +726,9 @@ anitrack-backend/src/modules/bee/
   - 右侧下方：Seasonal Schedule（表格/卡片）
 
 #### Timetable（时间表页）
-- 形态：横向滚动的“日期列”（每列为一天），列内按时间排序显示番剧条目
-- 交互：支持 7/14 天范围切换；后续可加“按星期”过滤与搜索
+- 形态：横向滚动的“日期列”（每列为一天，柏林日历日），列内条目按 `airTimeLocal` 字符串排序
+- 数据：`GET /api/anime-meta/timetable`（见 **§3.8.6**）；无本地钟点时左侧显示 **TBD**（暂缓完善，见 **§1.2**）
+- 交互：7 / 14 天切换；左右箭头横向滚动；**点击卡片** → 详情 Dialog（MAL / Bangumi ID、Synopsis、`POST /api/anime` 追更或打开已有条目的编辑 Dialog）
 
 ### 7.3 Heatmap 组件规范
 - 单元格：正方形（例如 10-14px），间距 2px
@@ -750,7 +776,8 @@ anitrack-backend/src/modules/bee/
 - [x] 拆分真实页面与组件（`/` Dashboard、`/library`、`/profile`），并完成 Watchlist 编辑/删除/状态迁移（Dialog）
 - [x] Heatmap：Profile 页从“过去一年日历格”升级为“人生纸格（月）”（每行 12 个月）；后端 heatmap 输出升级为 `{ start,end,months[] }`（added/completed/episodes + intensity）
 - [x] Dashboard 当季推荐：`GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，见 **§3.8.5**）+ 前端换一批 / 加入清单（Sonner）
-- [ ] Seasonal Schedule 页面（阶段 6 可选）
+- [x] 新番时间表：`/timetable` + `GET /api/anime-meta/timetable`（Bangumi 星期 + 镜像数据）；**播出钟点 TBD 问题暂缓**（见 **§1.2**）
+- [ ] 独立 Seasonal Schedule 页面（若仍希望纯 Jikan schedule 视图，可作为阶段 6 可选，与现行 Bangumi 驱动时间表并存或取舍）
 
 ---
 
@@ -760,10 +787,11 @@ anitrack-backend/src/modules/bee/
 - **Jikan**：阶段 3 优先落地 **后端代理 + §3.8 Cache-Aside（`AnimeMeta`）**；直连模式仅作 fallback。
 - OpenAPI：当前以 `public/swagger.json` 为源 + **`/api-docs`**（Swagger UI）；长期可选 **zod-to-openapi** 等单向生成（实现期再定）。
 - 语言控制系统，我们需要能够管理中文/英文的系统，不然前端页面不统一看着太乱了。番剧因为是从英文数据库爬取的还是保留英文就行
+- **Timetable**：`/timetable` 与 **`GET /api/anime-meta/timetable`** 已按「标题英文优先 + `synopsisEn`/`synopsisJa`」对齐后续 i18n；**本地播出钟点**在数据不全时显示 TBD，**暂缓专项攻关**（见 **§1.2**）。
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-05-13 增补**；原快照 2026-04-29）
+## 10. 实施进度快照（与仓库同步，**2026-05-13 第二次增补：Timetable 契约 + 播出时间暂缓**；原快照 2026-04-29）
 
 以下结论基于 **真实请求 + 数据库读写**（`anitrack-tester/api-test-suite/run-all.js`）、**仓库内 Vitest**（`npm test` / `npm run test:integration`），以及 **Contract Testing**（`anitrack-tester/contract-validator/run-contract-test.js`，**严格模式**：`CONTRACT_PENDING_PATHS` 为空）。
 
@@ -781,17 +809,17 @@ anitrack-backend/src/modules/bee/
 - **Vitest**：`heatmapCalc` 单测 + heatmap **integration test**（真实 Mongo，插入 **COMPLETED** 后断言 **count > 0**）。
 - **数据播种**：`api-test-suite/heatmap-seeder.js` 可稳定追加约 20 条 **COMPLETED**（不清库），用于联调 **intensity 0–4**。
 
-### 10.2 下一阶段焦点（阶段 3）
+### 10.2 下一阶段焦点（阶段 3+）
 
-- **Jikan**：`GET /api/anime-meta/search` 支持分页（`page/pageSize`），并返回 Jikan `pagination`；搜索结果 bulk upsert 写入 `AnimeMeta`（含 `synopsis/genres/totalEpisodes`）。
-- **前端**：Timetable 仍为 mock；Dashboard 其余能力（Stats / Watching / **当季推荐 §3.8.5**）已对接后端。后续可按 “The Pulse” 继续增强（例如 Timetable 真实排期、推荐个性化）。
+- **Jikan**：`GET /api/anime-meta/search` 已支持分页（`page/pageSize`）与 `pagination`；`AnimeMeta` bulk upsert 含 `synopsis/genres/totalEpisodes`。
+- **Timetable**：**真实数据已上线**（§3.8.6）；**播出钟点（`airTimeLocal`）大量仍为 TBD** — 已做 Bangumi 时间串规范化，完整排钟需上游数据或备选方案，**暂缓**，不阻塞其他里程碑。
+- **前端**：Dashboard（Stats / Watching / **当季推荐 §3.8.5**）与 Timetable 已对接后端；后续可做整站 i18n、推荐个性化、Auth 等。
 
 ### 10.3 实现侧备忘（避免重复踩坑）
 
 - **`PATCH` 与 Zod 默认值**：`AnimeEntryPatch` 解析时可能为 `completedDates` 填入默认空数组；路由层判断“是否触碰完成日期字段”应以 **原始 JSON 是否包含对应 key** 为准，避免把“仅更新 status”误判为“在写 completed 字段”。
 - **热力图 Aggregation**：任何涉及 **日历字符串** 与 **BSON `Date`** 的 **Normalization** 必须在 **`$group` 之前**完成，且 **`$match` 闭区间** 作用于 **同一规范化字段**，否则易出现 **静默空结果**。
-- 防止启动打架**Set-Location "C:\Users\HP\Desktop\my_page"; npm run dev**
-- 页面 /：http://localhost:3000/（主页面），http://localhost:3000/api-docs#/（Swagger UI）
+- **Swagger（主 API）**：后端 `http://localhost:3001/api-docs`；OpenAPI JSON `http://localhost:3001/swagger.json`。前端开发入口 `http://localhost:3000/`。
 
 ### 10.4 阶段 4–5 里程碑（2026-04-29）
 

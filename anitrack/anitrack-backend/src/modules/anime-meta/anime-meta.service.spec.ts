@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { AnimeMetaService } from './anime-meta.service';
 import { AnimeMeta } from './schemas/anime-meta.schema';
+import { AnimeMirror } from '../bee/schemas/anime-mirror.schema';
 import { BeeService } from '../bee/bee.service';
 
 describe('AnimeMetaService (cache-aside)', () => {
@@ -14,6 +15,9 @@ describe('AnimeMetaService (cache-aside)', () => {
     findOne: jest.Mock;
     create: jest.Mock;
   };
+  let mirrorModel: {
+    find: jest.Mock;
+  };
 
   beforeEach(async () => {
     model = {
@@ -21,10 +25,17 @@ describe('AnimeMetaService (cache-aside)', () => {
       create: jest.fn(),
     };
 
+    mirrorModel = {
+      find: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         AnimeMetaService,
         { provide: getModelToken(AnimeMeta.name), useValue: model },
+        { provide: getModelToken(AnimeMirror.name), useValue: mirrorModel },
         {
           provide: ConfigService,
           useValue: {
@@ -43,6 +54,7 @@ describe('AnimeMetaService (cache-aside)', () => {
           useValue: {
             getFreshMirror: jest.fn().mockResolvedValue(null),
             enqueueGeneral: jest.fn().mockResolvedValue(undefined),
+            sampleSeasonalMirrorDocs: jest.fn().mockResolvedValue([]),
           },
         },
       ],

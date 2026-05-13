@@ -6,14 +6,27 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Cache } from 'cache-manager';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
+import { stripHtmlSummary } from '../bee/bee-mapping.util';
 import { BeeService } from '../bee/bee.service';
+import { AnimeMirror, AnimeMirrorDocument } from '../bee/schemas/anime-mirror.schema';
 import { AnimeMeta, AnimeMetaDocument } from './schemas/anime-meta.schema';
 import type { JikanPagination } from './dto/anime-meta-search.dto';
+import {
+  bangumiWeekdayFromBerlinInstant,
+  formatDateSlashBerlin,
+  formatWeekdayLongZhBerlin,
+  formatYmdBerlin,
+  tokyoWallToBerlinClock,
+} from './timetable.util';
+
+const TIMETABLE_TZ = 'Europe/Berlin';
 
 type JikanAnimeResponse = {
   data?: {
     mal_id?: number;
     title?: string;
+    title_english?: string | null;
+    title_japanese?: string | null;
     episodes?: number | null;
     score?: number | null;
     images?: { jpg?: { image_url?: string | null } };
@@ -40,6 +53,8 @@ export class AnimeMetaService {
   constructor(
     @InjectModel(AnimeMeta.name)
     private readonly model: Model<AnimeMetaDocument>,
+    @InjectModel(AnimeMirror.name)
+    private readonly mirrorModel: Model<AnimeMirrorDocument>,
     private readonly config: ConfigService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     private readonly bee: BeeService,
@@ -366,5 +381,130 @@ export class AnimeMetaService {
       })
       .filter((v): v is NonNullable<typeof v> => Boolean(v));
     return { items };
+  }
+
+  /**
+   * 时间表用：Jikan `synopsis` 多为英文；若以假名为主则归为 synopsisJa，避免在时间表页展示中文简介。
+   */
+  private timetableSynopsisFields(rawSynopsis: unknown): {
+    synopsisEn?: string;
+    synopsisJa?: string;
+  } {
+    if (typeof rawSynopsis !== 'string' || !rawSynopsis.trim()) return {};
+    const plain = stripHtmlSummary(rawSynopsis.replace(/<[^>]+>/g, ' '));
+    if (!plain.trim()) return {};
+    let kana = 0;
+    let latin = 0;
+    for (const ch of plain) {
+      const c = ch.codePointAt(0) ?? 0;
+      if (c >= 0x3040 && c <= 0x30ff) kana += 1;
+      else if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) latin += 1;
+    }
+    if (kana >= 12 && kana >= latin * 1.15) return { synopsisJa: plain };
+    return { synopsisEn: plain };
+  }
+
+  /**
+   * 7/14 日横向时间表：基于 `AnimeMirror`（当季 + 已映射 Bangumi）与东京墙钟 → `Europe/Berlin` 展示。
+   */
+  async getTimetable(daysInput: number) {
+    const days = Math.min(14, Math.max(1, Math.floor(daysInput) || 7));
+    const mirrors = await this.mirrorModel
+      .find({
+        tier: 'seasonal',
+        malId: { $gt: 0 },
+        bgmId: { $exists: true, $ne: null },
+        'bangumi.weekday': { $exists: true, $type: 'number' },
+      })
+      .lean();
+
+    const daysOut: Array<{
+      date: string;
+      dateLabel: string;
+      weekdayLabel: string;
+      items: Array<{
+        malId: number;
+        bgmId: number;
+        title: string;
+        titleJp?: string;
+        titleEn?: string;
+        imageUrl?: string;
+        airTimeLocal?: string;
+        nextAirAtIso?: string;
+        synopsisEn?: string;
+        synopsisJa?: string;
+        episodeLabel: string;
+      }>;
+    }> = [];
+
+    type TimetableItemOut = (typeof daysOut)[number]['items'][number];
+
+    for (let i = 0; i < days; i++) {
+      const d = new Date(Date.now() + i * 86400000);
+      const jbgm = bangumiWeekdayFromBerlinInstant(d);
+      const date = formatYmdBerlin(d);
+      const weekdayLabel = formatWeekdayLongZhBerlin(d);
+      const dateLabel = formatDateSlashBerlin(d);
+
+      const items: TimetableItemOut[] = [];
+      for (const m of mirrors) {
+        const wd = m.bangumi?.weekday;
+        if (typeof wd !== 'number' || wd !== jbgm) continue;
+        const inner = (m.data as { data?: Record<string, unknown> } | undefined)?.data;
+        const imageUrl =
+          inner &&
+          typeof inner.images === 'object' &&
+          inner.images !== null &&
+          typeof (inner.images as { jpg?: { image_url?: string } }).jpg?.image_url === 'string'
+            ? (inner.images as { jpg?: { image_url?: string } }).jpg?.image_url
+            : undefined;
+
+        const innerTitle =
+          inner && typeof inner.title === 'string' ? String(inner.title).trim() : '';
+        const innerTitleEn =
+          inner && typeof inner.title_english === 'string'
+            ? String(inner.title_english).trim()
+            : '';
+        const innerTitleJp =
+          inner && typeof inner.title_japanese === 'string'
+            ? String(inner.title_japanese).trim()
+            : '';
+
+        const title =
+          (typeof m.titles?.en === 'string' && m.titles.en.trim()) ||
+          innerTitleEn ||
+          (typeof m.titles?.jp === 'string' && m.titles.jp.trim()) ||
+          innerTitleJp ||
+          innerTitle ||
+          (typeof m.titles?.cn === 'string' && m.titles.cn.trim()) ||
+          `mal:${m.malId}`;
+
+        const titleJp =
+          (typeof m.titles?.jp === 'string' && m.titles.jp.trim()) || innerTitleJp || undefined;
+        const titleEn =
+          (typeof m.titles?.en === 'string' && m.titles.en.trim()) || innerTitleEn || undefined;
+
+        const synopsisParts = this.timetableSynopsisFields(inner?.synopsis);
+
+        const conv = tokyoWallToBerlinClock(date, m.bangumi?.airTime);
+        items.push({
+          malId: m.malId,
+          bgmId: Number(m.bgmId),
+          title,
+          titleJp,
+          titleEn,
+          imageUrl,
+          airTimeLocal: conv?.clock ?? undefined,
+          nextAirAtIso: conv?.iso,
+          synopsisEn: synopsisParts.synopsisEn,
+          synopsisJa: synopsisParts.synopsisJa,
+          episodeLabel: 'Seasonal',
+        });
+      }
+      items.sort((a, b) => (a.airTimeLocal ?? '').localeCompare(b.airTimeLocal ?? ''));
+      daysOut.push({ date, dateLabel, weekdayLabel, items });
+    }
+
+    return { timezone: TIMETABLE_TZ, days: daysOut };
   }
 }

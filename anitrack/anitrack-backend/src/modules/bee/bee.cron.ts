@@ -29,5 +29,15 @@ export class BeeCron {
       this.log.warn(`seedRetry failed: ${e?.message ?? e}`);
     }
   }
+
+  /** 低频重跑 Bangumi 标题映射与 subject 补全（日历本身有 24h 缓存）。 */
+  @Interval(4 * 60 * 60 * 1000)
+  async bangumiMapPass() {
+    try {
+      await this.bee.tryBangumiMapSeasonal();
+    } catch (e: any) {
+      this.log.warn(`bangumiMapPass failed: ${e?.message ?? e}`);
+    }
+  }
 }
 

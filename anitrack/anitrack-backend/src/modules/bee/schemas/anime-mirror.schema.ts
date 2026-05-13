@@ -43,8 +43,10 @@ export class AnimeMirror {
     summaryCn?: string;
     /** 1–7：与 Bangumi `/calendar` 桶 `weekday.id` 对齐（若缺失则由桶推断） */
     weekday?: number;
-    /** "HH:mm" 东京本地播出墙钟（来自 calendar / subject） */
+    /** "HH:mm" 东京本地播出墙钟（来自 calendar / subject）；允许 **25:00–47:59** 记法 */
     airTime?: string;
+    /** Bangumi 日历 / subject 的 `air_date`（多为 `YYYY-MM-DD`，若含 `T` 时刻则可供时间表兜底） */
+    airDate?: string;
     /** 最近一次从 v0 subject 拉取详情的时间 */
     detailFetchedAt?: string;
     rawSubject?: unknown;

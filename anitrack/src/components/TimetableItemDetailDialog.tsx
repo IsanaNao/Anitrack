@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -47,6 +47,14 @@ export function TimetableItemDetailDialog({
 }) {
   const qc = useQueryClient();
   const actualOpen = open && Boolean(item);
+
+  useEffect(() => {
+    if (!actualOpen || !item) return;
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console -- 排障
+      console.log("[TimetableDialog]", "Original Time:", item.airTime, "Local:", item.airTimeLocal, "malId:", item.malId);
+    }
+  }, [actualOpen, item]);
 
   const listQ = useQuery({
     queryKey: ["anime", "timetable-dialog", item?.malId],

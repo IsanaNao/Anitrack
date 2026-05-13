@@ -83,49 +83,57 @@ export function stripHtmlSummary(s: string, maxLen = 800): string {
 }
 
 /**
- * Bangumi calendar / subject 的 `time` 有时是 `"23:30"`，有时是 `"2330"`。
- * 供时间表换算为欧洲本地钟面前使用。
+ * 解析 Bangumi 墙钟（含深夜档 **25:00 / 26:30** 等「超 24 点」记法）。
+ * 返回「当日 0–23 点内的时分」+ **向后推移的日历天数**（东京侧语义）。
+ */
+export function parseBangumiWallClockWithExtendedHours(
+  raw: string | undefined | null,
+): { hour: number; minute: number; dayOffset: number } | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  let h: number;
+  let m: number;
+
+  const colon = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (colon) {
+    h = Number(colon[1]);
+    m = Number(colon[2]);
+  } else if (/^\d{4}$/.test(s)) {
+    h = Number(s.slice(0, 2));
+    m = Number(s.slice(2, 4));
+  } else {
+    return null;
+  }
+
+  if (
+    !Number.isFinite(h) ||
+    !Number.isFinite(m) ||
+    h < 0 ||
+    h > 47 ||
+    m < 0 ||
+    m > 59
+  ) {
+    return null;
+  }
+
+  const totalMin = h * 60 + m;
+  const dayOffset = Math.floor(totalMin / (24 * 60));
+  const rem = totalMin % (24 * 60);
+  return { hour: Math.floor(rem / 60), minute: rem % 60, dayOffset };
+}
+
+/**
+ * Bangumi calendar / subject 的 `time`：`"23:30"` / `"2330"` / **`"26:00"`** 等。
+ * 返回值用于入库：超 24 点记法保留为 **`26:00`** 形式（两位小时最大 47）。
  */
 export function normalizeBangumiWallClock(
   raw: string | undefined | null,
 ): string | undefined {
-  if (raw == null) return undefined;
-  const s = String(raw).trim();
-  if (!s) return undefined;
-
-  const mColon = s.match(/^(\d{1,2}):(\d{2})$/);
-  if (mColon) {
-    const hh = Number(mColon[1]);
-    const mm = Number(mColon[2]);
-    if (
-      !Number.isFinite(hh) ||
-      !Number.isFinite(mm) ||
-      hh < 0 ||
-      hh > 23 ||
-      mm < 0 ||
-      mm > 59
-    ) {
-      return undefined;
-    }
-    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  }
-
-  const m4 = s.match(/^(\d{2})(\d{2})$/);
-  if (m4) {
-    const hh = Number(m4[1]);
-    const mm = Number(m4[2]);
-    if (
-      !Number.isFinite(hh) ||
-      !Number.isFinite(mm) ||
-      hh < 0 ||
-      hh > 23 ||
-      mm < 0 ||
-      mm > 59
-    ) {
-      return undefined;
-    }
-    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  }
-
-  return undefined;
+  const p = parseBangumiWallClockWithExtendedHours(raw);
+  if (!p) return undefined;
+  const totalH = p.dayOffset * 24 + p.hour;
+  if (totalH > 47 || p.minute > 59) return undefined;
+  return `${String(totalH).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
 }

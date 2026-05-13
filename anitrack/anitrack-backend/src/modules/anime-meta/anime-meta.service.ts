@@ -18,6 +18,7 @@ import {
   formatYmdBerlin,
   tokyoWallToBerlinClock,
 } from './timetable.util';
+import { resolveTimetableAirTimeRaw } from './timetable-air-resolve';
 
 const TIMETABLE_TZ = 'Europe/Berlin';
 
@@ -431,6 +432,8 @@ export class AnimeMetaService {
         imageUrl?: string;
         airTimeLocal?: string;
         nextAirAtIso?: string;
+        /** 用于调试：参与换算的原始播出字符串（Bangumi / Jikan 兜底合并前） */
+        airTime?: string;
         synopsisEn?: string;
         synopsisJa?: string;
         episodeLabel: string;
@@ -486,7 +489,11 @@ export class AnimeMetaService {
 
         const synopsisParts = this.timetableSynopsisFields(inner?.synopsis);
 
-        const conv = tokyoWallToBerlinClock(date, m.bangumi?.airTime);
+        const airRaw = resolveTimetableAirTimeRaw({
+          bangumi: (m.bangumi ?? null) as Record<string, unknown> | null,
+          jikanInner: inner && typeof inner === 'object' ? inner : undefined,
+        });
+        const conv = tokyoWallToBerlinClock(date, airRaw);
         items.push({
           malId: m.malId,
           bgmId: Number(m.bgmId),
@@ -494,6 +501,7 @@ export class AnimeMetaService {
           titleJp,
           titleEn,
           imageUrl,
+          airTime: airRaw,
           airTimeLocal: conv?.clock ?? undefined,
           nextAirAtIso: conv?.iso,
           synopsisEn: synopsisParts.synopsisEn,

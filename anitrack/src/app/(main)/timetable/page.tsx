@@ -49,6 +49,13 @@ function TimetableRow({ it, onSelect }: { it: TimetableItemApi; onSelect: (it: T
   const cd = countdownLabel(it.nextAirAtIso);
   const hasTime = Boolean(it.airTimeLocal?.trim());
 
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console -- 排障：确认原始播出串与柏林钟面
+      console.log("[Timetable]", "Original Time:", it.airTime, "Local:", it.airTimeLocal, "malId:", it.malId);
+    }
+  }, [it.airTime, it.airTimeLocal, it.malId]);
+
   return (
     <button
       type="button"

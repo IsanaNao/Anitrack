@@ -26,12 +26,32 @@ export class BeeController {
   @Post('sync-step')
   @ApiOperation({
     summary:
-      'Trigger one sync batch immediately (defaults to 3). Useful for manual verification.',
+      'Trigger one sync batch immediately (defaults to 3). Optional refreshSeasonalAirTimes=true re-fetches Bangumi v0 subject for up to airTimeRefreshLimit seasonal rows to fix airTime/weekday.',
   })
-  async syncStep(@Query('batchSize') batchSize?: string) {
+  async syncStep(
+    @Query('batchSize') batchSize?: string,
+    @Query('refreshSeasonalAirTimes') refreshSeasonalAirTimes?: string,
+    @Query('airTimeRefreshLimit') airTimeRefreshLimit?: string,
+  ) {
     const n = Math.max(1, Math.min(10, Number(batchSize ?? 3) || 3));
+    let seasonalAirTimeRefresh:
+      | { attempted: number; refreshed: number; errors: number }
+      | undefined;
+    if (
+      refreshSeasonalAirTimes === 'true' ||
+      refreshSeasonalAirTimes === '1'
+    ) {
+      const lim = Math.min(
+        200,
+        Math.max(1, Number(airTimeRefreshLimit ?? 50) || 50),
+      );
+      seasonalAirTimeRefresh = await this.bee.refreshSeasonalBangumiAirTimes(lim);
+    }
     await this.bee.syncBatch(n);
-    return this.bee.progressSnapshot();
+    const snap = await this.bee.progressSnapshot();
+    return seasonalAirTimeRefresh
+      ? { ...snap, seasonalAirTimeRefresh }
+      : snap;
   }
 
   @Get('bangumi-mapping')

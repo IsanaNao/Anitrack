@@ -43,7 +43,7 @@
 - **前端**：`/timetable` — 横向日期列、条目卡片、倒计时；点击条目打开详情并可 **加入清单（PLANNED / WATCHING）** 或跳转已有条目的 `AnimeEntryDialog`；**不**再做「番剧索引」占位 Tab。
 - **展示语言（时间表域）**：接口层对标题采用 **英文优先**（Bangumi `name_en` / Jikan `title_english` → 日文 → 中文兜底）；简介字段为 **`synopsisEn` / `synopsisJa`**（来自 Jikan `synopsis` 的轻量脚本分类），便于后续整站 i18n。
 
-> **暂缓（已知缺口）**：不少条目在 UI 上仍显示 **播出钟点 TBD**（`airTimeLocal` 为空）。已对 Bangumi `time` 做 **`HH:mm` / `HHmm` 规范化** 与入库归一，但若上游无可靠 `airTime`、或需额外数据源（例如更完整的 subject / 放送表），**排期展示仍待后续方案**，当前不阻塞其余功能交付。
+> **暂缓（已知缺口）**：不少条目在 UI 上仍显示 **播出钟点 TBD**（`airTimeLocal` 为空）。已实现侧包括：**`parseBangumiWallClockWithExtendedHours`**（`2330` / `25:00` / **`26:00`** 等）、**`dayjs` + `Asia/Tokyo` → `Europe/Berlin`** 换算、`getTimetable` 对 **`bangumi.airTime` / `airDate` / Jikan `broadcast`** 的兜底合并、**`POST /api/bee/sync-step?refreshSeasonalAirTimes=true`** 批量重拉 Bangumi subject、响应字段 **`airTime`**（与 `airTimeLocal` 对照排障）、开发态 **F12 日志**。若上游仍无可靠时刻，**TBD 仍可能出现**，完整排钟待后续数据源或策略。
 
 ### 1.3 Anime Heatmap（Highlight：绿墙）
 基于用户追番行为，生成类似 GitHub contributions 的“人生纸格”（按月）。
@@ -88,7 +88,8 @@
 
 ## 3. OpenAPI / Swagger：核心 API 端点与结构（Draft）
 
-> 说明：本节为契约草案；**运行时源文件**以仓库 `public/swagger.json` 为准，可视化文档为 **`/api-docs`**。后续可扩展 auth、**§3.8 元数据缓存**、导入等能力。  
+> 说明：本节为契约草案；**运行时 OpenAPI 文档**由 Nest 在启动时加载 **`anitrack-backend/swagger.json`**（`main.ts` → `SwaggerModule.setup('api-docs', …)`），浏览器访问 **`http://localhost:3001/api-docs`**，JSON：**`http://localhost:3001/swagger.json`**。  
+> **覆盖范围提示**：该文件当前**至少**包含 `GET/POST /api/anime`、`GET/PATCH/DELETE /api/anime/{id}`、`GET /api/stats/heatmap` 及若干 **GET** 发现类路径（Bee / `anime-meta`）；**仅 POST** 的端点（如 `POST /api/bee/sync-step`）若直接写入 `paths` 且未改契约冒烟逻辑，会导致 `contract-smoke-test` 对同一路径误发 **GET** 而失败，故可能仅写在 Blueprint 或 `@ApiOperation` 注释中。扩展契约时请同步 **`anitrack-tester/contract-validator`**。  
 > API Base：`/api`
 
 ### 3.1 公共约定
@@ -348,7 +349,8 @@
 
 - **Endpoint**：`GET /api/anime-meta/seasonal-random?limit=`（`limit` 可选，默认 4；后端将请求限制在约 1–12 条）
 - **数据源**：集合 `AnimeMirror`，匹配 `tier=seasonal` 且 `data` 已存在；使用 MongoDB 聚合 **`$sample`** 随机抽样
-- **响应**：`{ items: [...] }`，单项字段与 `AnimeMeta` 展示模型对齐（`malId/title/imageUrl/score/genres/totalEpisodes/...`）
+- **响应**：`{ items: [...] }`，单项字段与 `AnimeMeta` 展示模型对齐（`malId/title/imageUrl/score/genres/totalEpisodes/synopsis/...`）
+- **前端（Dashboard）**：推荐卡片可点击打开 **`SeasonalPickDetailDialog`**（封面、评分、类型、简介、**加入清单**）；列表下方「加入清单」按钮保留
 - **空数据**：若当季镜像尚未写入或仍在同步中，可能返回 `items: []`（前端应展示空态与 Bee 运行提示）
 
 #### 3.8.6 新番时间表（`GET /api/anime-meta/timetable`）
@@ -361,7 +363,8 @@
 - **单项 `items[]`（要点）**：
   - `malId` / `bgmId`、`imageUrl`（来自镜像内 Jikan payload）
   - `title`：英文优先显示串；`titleJp` / `titleEn`：多语言快照
-  - `airTimeLocal` / `nextAirAtIso`：由 `bangumi.airTime`（东京墙钟）+ 列日期换算；缺失则为空（前端显示 **TBD**）
+  - `airTime`：参与换算的**原始播出字符串**（排障用，可与 `airTimeLocal` 对照）
+  - `airTimeLocal` / `nextAirAtIso`：东京墙钟（**含扩展记法**）经 **`dayjs`（`Asia/Tokyo`）** 转 **`Europe/Berlin`**；解析前合并 `bangumi.airTime`、`airDate` 中含 `T` 的时刻、Jikan **`broadcast`** 等；缺失则为空（前端 **TBD**）
   - `synopsisEn` / `synopsisJa`：来自 Jikan 镜像 `synopsis`（非 Bangumi 中文简介）
   - `episodeLabel`：当前为 **`Seasonal`**（当季条目标记）
 
@@ -395,7 +398,7 @@ anitrack-backend/src/modules/bee/
 - `priority: number`（越小优先级越高）
 - **`bgmId`（可选）**：Bangumi `subject_id`；与 `ApiMapping` 对齐，用于日历匹配与 enrich
 - **`titles`（可选）**：`{ cn?, jp?, en? }` — 标题多语言快照（时间表英文优先展示依赖此结构 + Jikan `title_english`）
-- **`bangumi`（可选）**：`weekday`（1–7）、`airTime`（规范化为 `HH:mm` 的东京墙钟）、`summaryCn`（Bangumi subject 摘要，供其他能力）、`detailFetchedAt` 等
+- **`bangumi`（可选）**：`weekday`（1–7）、`airTime`（东京墙钟，允许 **25:00–47:59** 记法）、`airDate`（日历 `air_date`）、`summaryCn`、`detailFetchedAt` 等
 
 #### 3.9.3 调度节奏（避免 60 秒边界）
 - **每 65 秒**执行一次
@@ -451,6 +454,16 @@ anitrack-backend/src/modules/bee/
 - **入口**：Bee 服务内 `tryBangumiMapSeasonal()`（由 Cron 周期触发）：拉取 Bangumi `/calendar` 扁平化后与 Jikan 标题做模糊匹配，命中则 `upsert` **`ApiMapping(malId, bgmId)`** 并更新镜像上的 `titles` / `bangumi.weekday` / `bangumi.airTime`。
 - **Enrich**：`enrichBangumiSubject(malId, bgmId)` 拉取 Bangumi v0 subject，合并 `summaryCn`、`air_weekday`、`time`/`air_time` 等；`airTime` 写入前经 **`normalizeBangumiWallClock`**（兼容 `2330` → `23:30`）。
 - **与 §3.8.6 的关系**：时间表 API **只消费**镜像中已存在的 `bangumi.*` + `data`；映射未覆盖或上游无播出时刻时，对应列仍无 `airTimeLocal`（前端 **TBD**，见 **§1.2 暂缓说明**）。
+
+#### 3.9.12 `POST /api/bee/sync-step`（手动步进 + 可选当季播出纠正）
+
+> **注意**：该路径为 **POST**；若写入 `swagger.json` 的 `paths` 且未调整契约冒烟（默认对每条 path 发 **GET**），会导致冒烟失败。当前契约文件可能**仅**在本文档描述参数；完整 OpenAPI 条目需与 `contract-validator` 一并演进。
+
+- **Query**
+  - `batchSize`（可选）：本次 Jikan 镜像同步批大小，默认 `3`，上限 `10`
+  - `refreshSeasonalAirTimes`（可选）：`true` / `1` 时，在同步前先对最多 **`airTimeRefreshLimit`** 条 **`tier=seasonal` 且已映射 `bgmId`** 的文档调用 **`enrichBangumiSubject`**，用于纠正 **`bangumi.airTime` / `weekday` / `airDate`**
+  - `airTimeRefreshLimit`（可选）：与上一参数联用，默认 `50`，上限 `200`
+- **200 响应**：在默认情况下与 `GET /api/bee/status` 的快照结构一致；若执行了刷新，则额外包含 **`seasonalAirTimeRefresh: { attempted, refreshed, errors }`**
 
 ---
 
@@ -725,6 +738,9 @@ anitrack-backend/src/modules/bee/
   - 右侧上方：Heatmap（固定可见）
   - 右侧下方：Seasonal Schedule（表格/卡片）
 
+#### Dashboard（`/`）— 当季推荐
+- 「新番随机推荐」：**卡片可点击**打开 **`SeasonalPickDetailDialog`**（封面、评分、话数、类型、简介去 HTML、**加入清单 PLANNED**）；列表内保留「加入清单」快捷按钮；成功写入后关闭 Dialog 并刷新清单缓存
+
 #### Timetable（时间表页）
 - 形态：横向滚动的“日期列”（每列为一天，柏林日历日），列内条目按 `airTimeLocal` 字符串排序
 - 数据：`GET /api/anime-meta/timetable`（见 **§3.8.6**）；无本地钟点时左侧显示 **TBD**（暂缓完善，见 **§1.2**）
@@ -775,7 +791,7 @@ anitrack-backend/src/modules/bee/
 - [x] 桌面端成品化样式（原型页）：我的清单 4 列卡片网格、封面占位、状态配色 badge、搜索结果紧凑卡片
 - [x] 拆分真实页面与组件（`/` Dashboard、`/library`、`/profile`），并完成 Watchlist 编辑/删除/状态迁移（Dialog）
 - [x] Heatmap：Profile 页从“过去一年日历格”升级为“人生纸格（月）”（每行 12 个月）；后端 heatmap 输出升级为 `{ start,end,months[] }`（added/completed/episodes + intensity）
-- [x] Dashboard 当季推荐：`GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，见 **§3.8.5**）+ 前端换一批 / 加入清单（Sonner）
+- [x] Dashboard 当季推荐：`GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，见 **§3.8.5**）+ 前端换一批 / 加入清单（Sonner）+ **`SeasonalPickDetailDialog`**（卡片点击详情）
 - [x] 新番时间表：`/timetable` + `GET /api/anime-meta/timetable`（Bangumi 星期 + 镜像数据）；**播出钟点 TBD 问题暂缓**（见 **§1.2**）
 - [ ] 独立 Seasonal Schedule 页面（若仍希望纯 Jikan schedule 视图，可作为阶段 6 可选，与现行 Bangumi 驱动时间表并存或取舍）
 
@@ -785,13 +801,13 @@ anitrack-backend/src/modules/bee/
 
 - TODO：是否需要 auth？若课程不要求，可先做“单用户模式”（数据库不加 `userId` 或固定 `userId`）；多用户见 **§3.10**。
 - **Jikan**：阶段 3 优先落地 **后端代理 + §3.8 Cache-Aside（`AnimeMeta`）**；直连模式仅作 fallback。
-- OpenAPI：当前以 `public/swagger.json` 为源 + **`/api-docs`**（Swagger UI）；长期可选 **zod-to-openapi** 等单向生成（实现期再定）。
+- OpenAPI：仓库内 **`anitrack-backend/swagger.json`** 由 Nest 启动时加载；浏览器 **`http://localhost:3001/api-docs`**；契约冒烟对 `paths` 中每条路径发 **GET**（**POST-only** 端点见 **§3.9.12** 说明）。长期可选 **zod-to-openapi** 等单向生成（实现期再定）。
 - 语言控制系统，我们需要能够管理中文/英文的系统，不然前端页面不统一看着太乱了。番剧因为是从英文数据库爬取的还是保留英文就行
 - **Timetable**：`/timetable` 与 **`GET /api/anime-meta/timetable`** 已按「标题英文优先 + `synopsisEn`/`synopsisJa`」对齐后续 i18n；**本地播出钟点**在数据不全时显示 TBD，**暂缓专项攻关**（见 **§1.2**）。
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-05-13 第二次增补：Timetable 契约 + 播出时间暂缓**；原快照 2026-04-29）
+## 10. 实施进度快照（与仓库同步，**2026-05-13 第三次增补：Blueprint/README/任务进度 + Swagger GET 路径**；此前 2026-05-13 Timetable；原快照 2026-04-29）
 
 以下结论基于 **真实请求 + 数据库读写**（`anitrack-tester/api-test-suite/run-all.js`）、**仓库内 Vitest**（`npm test` / `npm run test:integration`），以及 **Contract Testing**（`anitrack-tester/contract-validator/run-contract-test.js`，**严格模式**：`CONTRACT_PENDING_PATHS` 为空）。
 
@@ -804,7 +820,7 @@ anitrack-backend/src/modules/bee/
   - **状态机**：非法迁移 **409**，`error.code` 为 **`INVALID_STATUS_TRANSITION`**。
   - **`COMPLETED` 副作用**：`completedDates` 自动维护为 **`YYYY-MM-DD`**；`DELETE` **204**。
 - **`GET /api/stats/heatmap`**：现行输出为 `{ start,end,months[] }`（按 `userId` 聚合：added=`createdAt`；completed/episodes=`completedAt + episodesWatched`），用于“人生纸格（月）”；支持 `start/end=YYYY-MM`。
-- **OpenAPI / Swagger UI**：`http://localhost:3000/swagger.json` + **`http://localhost:3000/api-docs`**（`swagger-ui-dist`）已可用，**Try it out** 同源测 API。
+- **OpenAPI / Swagger UI（主 API）**：**`http://localhost:3001/swagger.json`** + **`http://localhost:3001/api-docs`**（Nest 加载 `anitrack-backend/swagger.json`），**Try it out** 直连 Nest。前端 **`http://localhost:3000/`** 为页面入口；早期若存在 `public/swagger.json` 仅为历史对照，**勿与 3001 契约混淆**。
 - **Contract Testing**：**AJV**（OpenAPI 3.0 元模式）+ **SwaggerParser** + HTTP 冒烟；严格模式下 **全绿**，与实现 **契约一致**。
 - **Vitest**：`heatmapCalc` 单测 + heatmap **integration test**（真实 Mongo，插入 **COMPLETED** 后断言 **count > 0**）。
 - **数据播种**：`api-test-suite/heatmap-seeder.js` 可稳定追加约 20 条 **COMPLETED**（不清库），用于联调 **intensity 0–4**。

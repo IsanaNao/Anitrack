@@ -138,6 +138,8 @@ export type TimetableItemApi = {
   synopsisEn?: string;
   /** 以假名为主的简介（来自 Jikan synopsis 启发式分类） */
   synopsisJa?: string;
+  /** 原始播出字符串（Bangumi / Jikan 合并解析前），便于 F12 调试 */
+  airTime?: string;
   episodeLabel: string;
 };
 

@@ -81,7 +81,7 @@
 
 ### 3.4 自动化播种与契约回归
 - [x] **`heatmap-seeder.js`**：`api-test-suite` 下约 20 条 COMPLETED 播种；不清库；冲突重试；播种成功提示
-- [x] **Contract Testing**：`run-contract-test.js` 在 **`CONTRACT_PENDING_PATHS` 为空（严格模式）** 下与 `swagger.json`、运行时行为对齐（含 `/api/stats/heatmap` 路径存在性）
+- [x] **Contract Testing**：`run-contract-test.js` 在 **`CONTRACT_PENDING_PATHS` 为空（严格模式）** 下与 `anitrack-backend/swagger.json`、运行时行为对齐（含 `GET /api/stats/heatmap` 及 Bee / `anime-meta` 的 **GET** 路径存在性）
 
 ---
 
@@ -153,6 +153,11 @@
   - `POST /api/bee/seed-step`：在 backoff 结束后，手动触发一次轻量播种（只播种一档）
   - `POST /api/bee/sync-step?batchSize=3`：手动触发一次同步 batch
 
+### 4.9 整站双语切换（UI 国际化，后续里程碑）
+- [ ] **文案抽离**：导航、按钮、表单标签、空态、Sonner、错误提示等从硬编码迁出（`next-intl` / `react-i18next` 等**选型待定**）
+- [ ] **语言切换 UX**：中文 / 英文（或 `zh-CN` / `en`）切换入口；用户偏好持久化（`cookie` / `localStorage` + 可选与用户账号绑定）
+- [ ] **与数据层对齐**：番剧标题仍以数据源与既有策略为主（如英文优先 `title`、`synopsisEn` / `synopsisJa`）；避免把「作品元数据」与「壳层 UI 语言」混为一谈（Blueprint §9 随手记方向一致）
+
 ---
 
 ## 5. 决策记录（ADR / Decisions）
@@ -166,6 +171,7 @@
 
 ## 6. 问题清单（Open Questions）
 
+- [ ] **整站双语切换**：见 **§4.9**（后续功能；与作品元数据语言策略分开规划）
 - [ ] 是否需要登录/鉴权？（课程若不要求，可先单用户模式；多用户见 Blueprint **§3.10**）
 - [x] Jikan：已落地 **AnimeMeta Cache-Aside（Blueprint §3.8）**，并在创建条目时按 `malId` 自动抓取/缓存元数据
 - [x] Heatmap `from/to` 默认范围：**已实现**为「`to`= 指定 `tz` 的日历今天，`from` = `to` 往前 365 日」（闭区间）
@@ -176,7 +182,7 @@
 
 - 2026-04-20：创建 `PROJECT_BLUEPRINT.md` 与本文档 `TASK_PROGRESS.md`
 - 2026-04-20：MongoDB Atlas 接入（`.env.local`）；`/api/anime` 经外部脚本 `anitrack-tester/api-test-suite/run-all.js` 全绿；修复 `PATCH` 在仅传 `status` 时误触发 `completedDates` 默认值的校验问题（见 Blueprint「实施进度快照」）
-- 2026-04-20：新增 `public/swagger.json`（anime CRUD + heatmap 契约）与 `/api-docs`（`swagger-ui-dist`），本地可 Try it out
+- 2026-04-20：新增 **`anitrack-backend/swagger.json`**（初期为 anime CRUD + heatmap；后随 Bee / 时间表扩展 **GET** 路径）；早期若存在 `public/swagger.json` 为历史对照，**主契约以后端 3001 为准**
 - **2026-04-20（阶段 2 收口）**：攻克热力图 **MongoDB `Date` / `string` 混合类型** 在 **Aggregation Pipeline** 中与查询边界比较失效的问题（通过 **`$unwind` 后 Normalization** + `$dateToString` 等）；**Vitest** 单测 + 集成测试落地；`heatmap-seeder.js` 与 **Contract Testing**（`anitrack-tester/contract-validator`）在严格模式下与 OpenAPI 契约 **100% 对齐**（运行时冒烟全绿）
 - **2026-04-22（架构平移）**：后端从 Next.js Route Handlers 平移至 **NestJS**（端口 `3001`，全局前缀 `/api`，Swagger UI `/api-docs`）；`/api/anime` CRUD + `/api/stats/heatmap` 聚合逻辑已迁移并保持字段名不变；契约测试默认指向 `3001`（NestJS 作为主 API 供应方）
 - **2026-04-22（Ownership 拆分）**：引入双表：`AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有进度）；`POST /api/anime` 仅需 `malId`；响应中嵌套 `animeMeta`；`Stats/heatmap` 加入 `TEMP_USER_ID` 过滤；契约测试与 e2e 全绿
@@ -213,14 +219,19 @@
 
 - **2026-05-13（Dashboard 当季推荐：Mirror-only）**：
   - 后端：`GET /api/anime-meta/seasonal-random?limit=` — 对 `AnimeMirror` 中 `tier=seasonal` 且已写入 `data` 的文档做 MongoDB `$sample`，映射为 `AnimeMeta` 形状；**该接口不发起 Jikan HTTP**
-  - 前端：Dashboard「新番随机推荐」对接上述接口；换一批 / 加入清单；Sonner 提示（含重复添加 `toast.info`）
+  - 前端：Dashboard「新番随机推荐」对接上述接口；换一批 / 加入清单；Sonner 提示（含重复添加 `toast.info`）；卡片可点开 **`SeasonalPickDetailDialog`**
 
----
+- **2026-05-13（文档与 OpenAPI 增量）**：
+  - `PROJECT_BLUEPRINT.md`：§1.2 / §3.8.5–3.8.6 / §3.9.12（`sync-step` 查询参数）/ §7.2 Dashboard 详情 / §9–§10 与 **3001** Swagger 源文件路径对齐
+  - `README.md`、`TASK_PROGRESS.md`：契约说明、当季推荐详情 Dialog
+  - `anitrack-backend/swagger.json`：补充 **`GET /api/bee/status`**、**`GET /api/bee/bangumi-mapping`**、**`GET /api/anime-meta/seasonal-random`**、**`GET /api/anime-meta/timetable`**（与契约冒烟 **GET-only** 策略一致；**POST** 端点仍以 Blueprint 为准）
+
 
 ## 9. 技术债务（Tech Debt）
 
 - **TEMP_USER_ID**：仍作为 dev fallback 存在；但已通过 `@CurrentUser()` 装饰器集中收口。接入 Auth 后应把 `CurrentUser` 的来源替换为 token/session 注入的真实 user id
 - **Timetable `airTimeLocal`**：大量条目仍为 **TBD**（Bangumi/Jikan 侧播出字段不完整或映射未覆盖）；已做 `airTime` 字符串规范化，**完整排钟待专项**
+- **OpenAPI 与冒烟策略**：`swagger.json` 已覆盖主要 **GET** 发现类路径；**POST-only** Bee 步进（`sync-step` / `seed-step` / `bangumi-map`）未写入 `paths`，避免契约冒烟误发 **GET**；完整纳入需改 `contract-smoke-test` 或拆「仅文档路径」
 - **索引迁移风险**：旧集合上可能残留 `{ malId: 1 } unique` 索引会阻止新结构插入  
   - 已在服务启动时调用 `this.animeEntryModel.syncIndexes()`（无 DB 时跳过）  
   - 若 Atlas 上仍异常，建议在网页端 **Drop `animeentries` collection** 后重启，让新索引干净重建

@@ -7,7 +7,9 @@
   },
   "tags": [
     { "name": "Anime", "description": "Watchlist entries (MongoDB-backed)" },
-    { "name": "Statistics", "description": "Aggregated analytics (heatmap contract; implementation in phase 2)" }
+    { "name": "Statistics", "description": "Aggregated analytics (heatmap contract; implementation in phase 2)" },
+    { "name": "Bee", "description": "Intelligent mirroring (Jikan → AnimeMirror)" },
+    { "name": "AnimeMeta", "description": "Metadata cache, search, timetable, seasonal picks" }
   ],
   "paths": {
     "/api/anime": {
@@ -274,6 +276,91 @@
           }
         }
       }
+    },
+    "/api/bee/status": {
+      "get": {
+        "tags": ["Bee"],
+        "summary": "Bee mirror progress snapshot",
+        "description": "Returns tier counters and optional backoff metadata. Used by dashboard dev tooling and contract smoke (GET).",
+        "responses": {
+          "200": {
+            "description": "Progress snapshot JSON.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BeeProgressSnapshot" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bee/bangumi-mapping": {
+      "get": {
+        "tags": ["Bee"],
+        "summary": "Bangumi ↔ MAL mapping snapshot (counts)",
+        "responses": {
+          "200": {
+            "description": "Mongo-backed mapping counts for debugging.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BeeProgressSnapshot" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/anime-meta/seasonal-random": {
+      "get": {
+        "tags": ["AnimeMeta"],
+        "summary": "Random seasonal picks from AnimeMirror",
+        "description": "Samples `tier=seasonal` mirrors with `data`; does not call Jikan on this path.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 12, "default": 4 },
+            "description": "Number of cards to return (capped 1–12)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wrapped list of `AnimeMeta`-shaped items.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SeasonalRandomResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/anime-meta/timetable": {
+      "get": {
+        "tags": ["AnimeMeta"],
+        "summary": "7/14-day seasonal timetable (Europe/Berlin)",
+        "description": "Columns are Berlin calendar days; items from mapped seasonal mirrors.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 14, "default": 7 },
+            "description": "Horizon in days (clamped 1–14)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Timezone plus per-day columns with timetable cards.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TimetableResponse" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -334,6 +421,45 @@
                 "items": { "$ref": "#/components/schemas/ApiErrorDetail" }
               }
             }
+          }
+        }
+      },
+      "BeeProgressSnapshot": {
+        "type": "object",
+        "description": "Loose JSON snapshot for Bee progress or mapping counts (fields evolve with implementation).",
+        "additionalProperties": true
+      },
+      "SeasonalRandomResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AnimeMeta" }
+          }
+        }
+      },
+      "TimetableDayColumn": {
+        "type": "object",
+        "required": ["date", "dateLabel", "weekdayLabel", "items"],
+        "properties": {
+          "date": { "type": "string", "description": "Berlin calendar date YYYY-MM-DD." },
+          "dateLabel": { "type": "string" },
+          "weekdayLabel": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          }
+        }
+      },
+      "TimetableResponse": {
+        "type": "object",
+        "required": ["timezone", "days"],
+        "properties": {
+          "timezone": { "type": "string", "example": "Europe/Berlin" },
+          "days": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TimetableDayColumn" }
           }
         }
       },

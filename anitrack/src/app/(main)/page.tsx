@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AnimeEntry } from "@/lib/api";
+import type { AnimeEntry, AnimeMeta } from "@/lib/api";
 import {
   ApiClientError,
   createAnimeEntry,
@@ -14,6 +14,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { AnimeCard } from "@/components/AnimeCard";
 import { AnimeEntryDialog } from "@/components/AnimeEntryDialog";
+import { SeasonalPickDetailDialog } from "@/components/SeasonalPickDetailDialog";
 import { toast } from "sonner";
 
 export default function DashboardPage() {
@@ -21,6 +22,8 @@ export default function DashboardPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<AnimeEntry | null>(null);
   const [seasonalPickNonce, setSeasonalPickNonce] = useState(0);
+  const [seasonalDetailOpen, setSeasonalDetailOpen] = useState(false);
+  const [seasonalDetailMeta, setSeasonalDetailMeta] = useState<AnimeMeta | null>(null);
   const queryClient = useQueryClient();
 
   const summary = useQuery({
@@ -49,6 +52,8 @@ export default function DashboardPage() {
       createAnimeEntry({ malId: vars.malId, status: "PLANNED" }),
     onSuccess: (entry) => {
       void queryClient.invalidateQueries({ queryKey: ["anime"] });
+      setSeasonalDetailOpen(false);
+      setSeasonalDetailMeta(null);
       const title =
         entry.animeMeta && typeof entry.animeMeta.title === "string"
           ? entry.animeMeta.title
@@ -93,6 +98,22 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <AnimeEntryDialog open={dialogOpen} onOpenChange={setDialogOpen} entry={selectedEntry} />
+      <SeasonalPickDetailDialog
+        open={seasonalDetailOpen}
+        onOpenChange={(v) => {
+          setSeasonalDetailOpen(v);
+          if (!v) setSeasonalDetailMeta(null);
+        }}
+        meta={seasonalDetailMeta}
+        addPending={addFromRecommend.isPending}
+        onAddToList={() => {
+          if (!seasonalDetailMeta) return;
+          addFromRecommend.mutate({
+            malId: seasonalDetailMeta.malId,
+            title: seasonalDetailMeta.title,
+          });
+        }}
+      />
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -230,13 +251,22 @@ export default function DashboardPage() {
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {seasonalPicks.data.items.map((m) => (
               <div key={m.malId} className="flex flex-col gap-2">
-                <AnimeCard
-                  title={m.title}
-                  imageUrl={m.imageUrl}
-                  malId={m.malId}
-                  genres={m.genres}
-                  totalEpisodes={m.totalEpisodes ?? m.episodes}
-                />
+                <button
+                  type="button"
+                  className="block w-full cursor-pointer rounded-xl text-left outline-none ring-offset-2 transition-opacity hover:opacity-95 focus-visible:ring-2 focus-visible:ring-zinc-400 dark:focus-visible:ring-zinc-500"
+                  onClick={() => {
+                    setSeasonalDetailMeta(m);
+                    setSeasonalDetailOpen(true);
+                  }}
+                >
+                  <AnimeCard
+                    title={m.title}
+                    imageUrl={m.imageUrl}
+                    malId={m.malId}
+                    genres={m.genres}
+                    totalEpisodes={m.totalEpisodes ?? m.episodes}
+                  />
+                </button>
                 <button
                   type="button"
                   disabled={addFromRecommend.isPending}

@@ -501,6 +501,49 @@ export class BeeService implements OnModuleInit {
     return { synced };
   }
 
+  /**
+   * 对当季已映射 Bangumi 的条目强制再拉 v0 subject，合并 `airTime` / `weekday` / `airDate` 等。
+   * 单次最多处理 `limit` 条（默认 50，上限 200），避免请求超时；可多次调用。
+   */
+  async refreshSeasonalBangumiAirTimes(limit = 50): Promise<{
+    attempted: number;
+    refreshed: number;
+    errors: number;
+  }> {
+    if (!this.bangumiEnabled()) {
+      return { attempted: 0, refreshed: 0, errors: 0 };
+    }
+    const cap = Math.min(200, Math.max(1, Math.floor(limit) || 50));
+    const docs = await this.mirrorModel
+      .find({
+        tier: 'seasonal',
+        bgmId: { $exists: true, $ne: null },
+      })
+      .sort({ malId: 1 })
+      .limit(cap)
+      .lean();
+
+    let refreshed = 0;
+    let errors = 0;
+    for (const d of docs) {
+      const malId = Number(d.malId);
+      const bgmId = Number(d.bgmId);
+      if (!Number.isFinite(malId) || malId <= 0 || !Number.isFinite(bgmId) || bgmId <= 0) {
+        continue;
+      }
+      try {
+        await this.enrichBangumiSubject(malId, bgmId);
+        refreshed += 1;
+      } catch {
+        errors += 1;
+      }
+    }
+    this.log.log(
+      `[Bee] refreshSeasonalBangumiAirTimes: attempted=${docs.length} ok=${refreshed} err=${errors}`,
+    );
+    return { attempted: docs.length, refreshed, errors };
+  }
+
   async progressSnapshot() {
     const tiers: Array<AnimeMirror['tier']> = [
       'seasonal',
@@ -795,9 +838,15 @@ export class BeeService implements OnModuleInit {
 
         const display = titleCn || titleJp || String(bgmId);
 
-        const wallClock = normalizeBangumiWallClock(
-          typeof pick.item.time === 'string' ? pick.item.time : undefined,
-        );
+        const rawT =
+          typeof pick.item.time === 'string' ? pick.item.time.trim() : '';
+        const wallClock =
+          normalizeBangumiWallClock(rawT || undefined) ?? (rawT || undefined);
+
+        const airDateRaw =
+          typeof pick.item.air_date === 'string' && pick.item.air_date.trim()
+            ? pick.item.air_date.trim()
+            : undefined;
 
         await this.mirrorModel.updateOne(
           { malId },
@@ -805,10 +854,9 @@ export class BeeService implements OnModuleInit {
             $set: {
               bgmId,
               titles: { cn: titleCn, jp: titleJp, en: titleEn },
-              bangumi: {
-                weekday: pick.bucketWeekday ?? pick.item.air_weekday,
-                airTime: wallClock,
-              },
+              'bangumi.weekday': pick.bucketWeekday ?? pick.item.air_weekday,
+              'bangumi.airTime': wallClock,
+              ...(airDateRaw ? { 'bangumi.airDate': airDateRaw } : {}),
             },
           },
         );
@@ -856,10 +904,16 @@ export class BeeService implements OnModuleInit {
           : undefined;
     const airTimeNorm = normalizeBangumiWallClock(airTimeRaw);
 
+    const airDateSub =
+      typeof (sub as { air_date?: unknown }).air_date === 'string'
+        ? String((sub as { air_date?: string }).air_date).trim()
+        : undefined;
+
     const cur = await this.mirrorModel.findOne({ malId }).lean();
     const prevB = (cur?.bangumi ?? {}) as {
       weekday?: number;
       airTime?: string;
+      airDate?: string;
       summaryCn?: string;
     };
 
@@ -871,6 +925,7 @@ export class BeeService implements OnModuleInit {
         airTimeNorm ??
         normalizeBangumiWallClock(prevB.airTime) ??
         prevB.airTime,
+      airDate: airDateSub ?? prevB.airDate,
       detailFetchedAt: new Date().toISOString(),
     };
 

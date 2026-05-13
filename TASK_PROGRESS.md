@@ -8,14 +8,14 @@
 ## 0. 当前状态（每次更新这里）
 
 - **当前阶段**：阶段 5+（增量交付）：Dashboard “The Pulse” 局部激活 + Profile 统计后端化 + Timetable UI 占位页
-- **正在做**：文档口径与实现对齐（Blueprint/README/进度文档同步）
+- **正在做**：—（最近一次：Dashboard 当季推荐已改为 Bee `AnimeMirror` 纯库读路径）
 - **下一步**：
   - Timetable：从 mock UI 升级为真实数据（Jikan schedule / 后端聚合 + 缓存）
-  - 推荐：从占位升级为每日推荐（Jikan random + Library 标签）
-  - Bee 镜像系统：在开发环境持续镜像 Jikan 元数据到本地 `AnimeMirror`，并逐步让 Schedule/Recommendation 走 Mirror-first
+  - 推荐：在现有「镜像 `$sample` 随机当季」基础上，可选升级为每日个性化（结合 `AnimeEntry` / 标签偏好等；读路径仍以 Mirror 为主）
+  - Bee 镜像系统：在开发环境持续镜像 Jikan 元数据到 Atlas `AnimeMirror`；Schedule 等能力继续 Mirror-first 收口
   - Auth：替换 `TEMP_USER_ID`（JWT/Session）
 - **阻塞/风险**：Auth 未接入前，`CurrentUser` 仍会回退到 `TEMP_USER_ID`（技术债，见下）
-- **最后更新时间**：2026-05-07
+- **最后更新时间**：2026-05-13
 
 ---
 
@@ -126,7 +126,8 @@
 - [x] 激活 Profile & Stats：新增 `GET /api/stats/summary`，Dashboard 顶部展示总量/完成/评分等指标
 - [x] Watching Now：横向滚动流 + onWheel 劫持（区块内垂直滚轮映射为水平滚动），卡片统一 `aspect-[2/3]`、封面 `h-48 object-cover`、进度条
 - [x] Watching Now 卡片可点击：复用 `AnimeEntryDialog` 编辑进度/状态/评分
-- [ ] Daily Recommendation：暂用“新番随机推荐（占位）”，后续接入每日推荐算法
+- [x] Dashboard「新番随机推荐」：`GET /api/anime-meta/seasonal-random` 从 `AnimeMirror`（`tier=seasonal`）`$sample` 抽样，**读路径不调用 Jikan**；前端换一批 + 加入清单（Sonner 成功/重复/错误提示）
+- [ ] 推荐增强（可选）：每日个性化 / Library 标签加权等
 
 ### 4.7 Timetable（新增页面，占位）
 - [x] 新增 `/timetable` 页面：横向滚动的“日期列”时间表 UI（7天/14天切换），数据暂为 mock
@@ -140,6 +141,7 @@
 - [x] 数据保鲜（按 tier）：seasonal 7 天 / top40 30 天 / top100 60 天 / top200 180 天 / backfill 60 天
 - [x] 多级优先级：seasonal ＞ top40 ＞ top100 ＞ top200 ＞ 季度回滚 backfill（全部跑满后才启动回滚）
 - [x] 读路径适配：`AnimeMetaService.getOrFetchByMalId` 先查 mirror（fresh 命中则落 `AnimeMeta`），miss 时再走 Jikan，并被动 enqueue general
+- [x] 推荐读路径：`AnimeMirror` 当季随机抽样接口（见上 4.6），与 `getOrFetchByMalId` 的 Mirror-first 互补
 - [x] 开关：`SYNC_ENABLED=true` 时启动后自动 seed `/seasons/now` 并开始静默同步（控制台输出进度）
 - [x] Seed 重试：每 30 分钟低频重试播种 top tiers（upsert，不会重复写入），避免启动时短暂 429 导致 tier 不完整
 - [x] 手动触发/排障：
@@ -160,7 +162,7 @@
 
 ## 6. 问题清单（Open Questions）
 
-- [ ] 是否需要登录/鉴权？（课程若不要求，可先单用户模式；多用户见 Blueprint **§3.9**）
+- [ ] 是否需要登录/鉴权？（课程若不要求，可先单用户模式；多用户见 Blueprint **§3.10**）
 - [x] Jikan：已落地 **AnimeMeta Cache-Aside（Blueprint §3.8）**，并在创建条目时按 `malId` 自动抓取/缓存元数据
 - [x] Heatmap `from/to` 默认范围：**已实现**为「`to`= 指定 `tz` 的日历今天，`from` = `to` 往前 365 日」（闭区间）
 
@@ -199,6 +201,10 @@
   - 前端：Dashboard “正在观看”改为横向滚动流 + onWheel 映射；AnimeCard 统一比例与进度条；卡片可点击打开编辑 Dialog
   - 前端：Profile Heatmap 增加 Legend；Activity 面板改为后端接口驱动
   - 前端：新增 Timetable 页面（UI 占位）与 Dashboard 底部“新番随机推荐（占位）”
+
+- **2026-05-13（Dashboard 当季推荐：Mirror-only）**：
+  - 后端：`GET /api/anime-meta/seasonal-random?limit=` — 对 `AnimeMirror` 中 `tier=seasonal` 且已写入 `data` 的文档做 MongoDB `$sample`，映射为 `AnimeMeta` 形状；**该接口不发起 Jikan HTTP**
+  - 前端：Dashboard「新番随机推荐」对接上述接口；换一批 / 加入清单；Sonner 提示（含重复添加 `toast.info`）
 
 ---
 

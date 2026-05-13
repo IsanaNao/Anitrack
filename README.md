@@ -22,6 +22,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **统计接口后端化**：
   - `GET /api/stats/summary`：Profile/Dashboard 顶部指标（总量、完成数、在看数、平均评分、已看总集数）
   - `GET /api/stats/activity?month=YYYY-MM`：月度 Activity（Added/Completed 列表），前端不再全量拉取再过滤
+  - `GET /api/anime-meta/seasonal-random`：Dashboard 当季推荐卡片池（MongoDB `$sample` / `AnimeMirror`，**不调用 Jikan**）
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
 - **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
@@ -29,7 +30,8 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
   - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
   - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
   - **多级优先级镜像**：`seasonal`（当季）＞ `top_1y`（Top40）＞ `top_5y`（Top100）＞ `top_all`（Top200）＞ `backfill`（季度回滚补漏），并通过 `tier/priority` 在数据库中持久化队列状态。
-  - **Mirror-first** 策略：Schedule / Recommendation 等高频读路径优先走本地镜像，显著降低对三方 API 的依赖，从工程上缓解 **429 Rate Limit** 风险（配合 24h 缓存进一步加固）。
+  - **Mirror-first** 策略：Schedule、按 `malId` 补全元数据等路径优先走本地镜像；**Dashboard 当季推荐**使用 `GET /api/anime-meta/seasonal-random`，仅从 `AnimeMirror`（`tier=seasonal`）抽样，**该读路径不发起 Jikan HTTP**。
+  - 显著降低对三方 API 的依赖与 **429** 风险（配合 24h 缓存进一步加固）。
 
 ### 2) 契约驱动开发（Contract-Driven）
 
@@ -58,8 +60,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - [x] 阶段 1：核心 Watchlist CRUD 与数据库持久化
 - [x] 阶段 2：统计聚合逻辑与多维自动化测试
 - [x] 阶段 3：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发（Dashboard/The Pulse、Profile Heatmap、Library Dialog）
-- [ ] 阶段 4（进行中）：Timetable（时间表页）与推荐模块从占位升级为真实数据；进一步性能与鲁棒性收口
-- [ ] 阶段 4：用户认证与多用户数据隔离
+- [ ] 阶段 4（进行中）：Timetable 仍为 mock；**Dashboard 当季推荐**已对接 `GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，无 Jikan 读路径）；用户认证与多用户数据隔离待办
 
 ## 🛠 快速开始（给队友）
 

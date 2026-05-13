@@ -342,6 +342,15 @@
 #### 3.8.4 运行时缓存（CacheModule，24h）
 除 MongoDB 的影子库缓存外，后端已引入 NestJS `CacheModule`，对所有 Jikan HTTP 请求做 24h 缓存（cache key 基于完整 URL），用于从根源降低 429（Rate Limit）发生概率。
 
+#### 3.8.5 当季随机推荐（`seasonal-random`，纯 Mongo / 无 Jikan HTTP）
+
+> Dashboard「新番随机推荐」读路径：**不调用 Jikan**，仅依赖 Bee 已写入的 `AnimeMirror`（当季队列需已同步 `data`）。
+
+- **Endpoint**：`GET /api/anime-meta/seasonal-random?limit=`（`limit` 可选，默认 4；后端将请求限制在约 1–12 条）
+- **数据源**：集合 `AnimeMirror`，匹配 `tier=seasonal` 且 `data` 已存在；使用 MongoDB 聚合 **`$sample`** 随机抽样
+- **响应**：`{ items: [...] }`，单项字段与 `AnimeMeta` 展示模型对齐（`malId/title/imageUrl/score/genres/totalEpisodes/...`）
+- **空数据**：若当季镜像尚未写入或仍在同步中，可能返回 `items: []`（前端应展示空态与 Bee 运行提示）
+
 ---
 
 ### 3.9 Bee：Anime Mirror System（Cron 镜像同步）
@@ -740,6 +749,7 @@ anitrack-backend/src/modules/bee/
 - [x] 桌面端成品化样式（原型页）：我的清单 4 列卡片网格、封面占位、状态配色 badge、搜索结果紧凑卡片
 - [x] 拆分真实页面与组件（`/` Dashboard、`/library`、`/profile`），并完成 Watchlist 编辑/删除/状态迁移（Dialog）
 - [x] Heatmap：Profile 页从“过去一年日历格”升级为“人生纸格（月）”（每行 12 个月）；后端 heatmap 输出升级为 `{ start,end,months[] }`（added/completed/episodes + intensity）
+- [x] Dashboard 当季推荐：`GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，见 **§3.8.5**）+ 前端换一批 / 加入清单（Sonner）
 - [ ] Seasonal Schedule 页面（阶段 6 可选）
 
 ---
@@ -753,7 +763,7 @@ anitrack-backend/src/modules/bee/
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-04-29 更新**）
+## 10. 实施进度快照（与仓库同步，**2026-05-13 增补**；原快照 2026-04-29）
 
 以下结论基于 **真实请求 + 数据库读写**（`anitrack-tester/api-test-suite/run-all.js`）、**仓库内 Vitest**（`npm test` / `npm run test:integration`），以及 **Contract Testing**（`anitrack-tester/contract-validator/run-contract-test.js`，**严格模式**：`CONTRACT_PENDING_PATHS` 为空）。
 
@@ -774,7 +784,7 @@ anitrack-backend/src/modules/bee/
 ### 10.2 下一阶段焦点（阶段 3）
 
 - **Jikan**：`GET /api/anime-meta/search` 支持分页（`page/pageSize`），并返回 Jikan `pagination`；搜索结果 bulk upsert 写入 `AnimeMeta`（含 `synopsis/genres/totalEpisodes`）。
-- **前端**：完成多页面路由与深交互（debounce 搜索 + 分页；Library 全局单实例 Dialog 编辑/删除；Profile 绿墙与统计）。Dashboard 当前仍包含部分占位区块（后续将按 “The Pulse” 方向激活）。
+- **前端**：Timetable 仍为 mock；Dashboard 其余能力（Stats / Watching / **当季推荐 §3.8.5**）已对接后端。后续可按 “The Pulse” 继续增强（例如 Timetable 真实排期、推荐个性化）。
 
 ### 10.3 实现侧备忘（避免重复踩坑）
 

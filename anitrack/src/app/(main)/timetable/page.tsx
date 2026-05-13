@@ -193,7 +193,7 @@ export default function TimetablePage() {
         entry={libraryEntry}
       />
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-zinc-800">
           <div className="flex items-end gap-6 text-sm">
             <span className="border-b-2 border-sky-400 pb-0.5 font-semibold text-slate-800 dark:border-sky-500 dark:text-zinc-100">
@@ -257,7 +257,7 @@ export default function TimetablePage() {
               ref={scrollRef}
               className="overflow-x-auto scroll-smooth px-3 pb-4 pt-3 sm:px-10 [scrollbar-width:thin]"
             >
-              <div className="inline-flex min-h-[280px] items-stretch divide-x divide-dashed divide-slate-200 dark:divide-zinc-800">
+              <div className="inline-flex min-h-[200px] items-start divide-x divide-dashed divide-slate-200 dark:divide-zinc-800">
                 {q.data.days.map((day) => (
                   <DayColumn
                     key={day.date}

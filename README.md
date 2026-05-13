@@ -2,6 +2,8 @@
 
 基于 **Next.js（前端）+ NestJS（后端）+ MongoDB** 的番剧进度管理系统，支持自动化热力图统计与多维契约测试。
 
+> **里程碑（2026-05-14）**：课程启动时规划的 **Watchlist、统计/热力图、Jikan 搜索与缓存、Bee 镜像、Dashboard / Library / Profile、当季推荐、新番时间表（Bangumi 为主 + Jikan 兜底）** 等能力已在仓库中闭环。后续 **双语 UI、深度 UI/UX、登录多用户、放送数据「零 TBD」** 等均为**锦上添花**，详见根目录 **`PROJECT_BLUEPRINT.md` §10.5** 与 **`TASK_PROGRESS.md` §0 / §11**。
+
 ## 🗂️ 仓库结构（双文件夹架构）
 
 - `anitrack/`：Next.js 前端（也保留了早期的 Next.js Route Handlers 版本，便于对照）
@@ -26,7 +28,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
 - **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
-- **新番时间表（Timetable）**：前端 **`/timetable`** 对接 **`GET /api/anime-meta/timetable`**（7/14 天、`Europe/Berlin` 日期列）；数据来自 **当季 `AnimeMirror` + Bangumi 映射**（非 Jikan schedule 直连）。条目可点开详情并 **加入清单（PLANNED / WATCHING）** 或编辑已有条目。**已知限制**：部分条目 **播出钟点仍显示 TBD**（`airTimeLocal` 依赖上游 `airTime` 等字段，已做格式规范化，完整排期待后续方案）。
+- **新番时间表（Timetable）**：前端 **`/timetable`** 对接 **`GET /api/anime-meta/timetable`**（7/14 天、`Europe/Berlin` 日期列）；数据来自 **当季 `AnimeMirror`**，**星期**以 Bangumi 为主、**Jikan `broadcast` 为兜底**（未映射 Bangumi 时 `bgmId` 可能为 `0`）。条目可点开详情并 **加入清单** 或编辑已有条目。**已知限制**：部分条目 **缺列或钟点 TBD**（映射失败或上游无可靠时刻），与 UI 高度无关。
 - **🐝 Intelligent Data Mirroring（Bee System）**：
   - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
   - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
@@ -40,7 +42,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **多层级测试套件**：
   - **Vitest 单元测试**：覆盖核心算法与日期计算
   - **集成测试**：验证 API 与 MongoDB 的真实交互
-  - **契约回归测试**：自动化校验代码实现与 Swagger 规范的 **100% 对齐**
+  - **契约回归测试**：在契约冒烟**已声明的路径与字段范围内**，校验实现与 `swagger.json` 一致（详见 `anitrack-tester/contract-validator`；POST-only 端点见 Blueprint）
 
 ### 3) 工程化工具集
 
@@ -61,8 +63,16 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - [x] 阶段 1：核心 Watchlist CRUD 与数据库持久化
 - [x] 阶段 2：统计聚合逻辑与多维自动化测试
 - [x] 阶段 3：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发（Dashboard/The Pulse、Profile Heatmap、Library Dialog）
-- [x] 阶段 4（进行中收尾）：**`/timetable`** 已对接 **`GET /api/anime-meta/timetable`**；Dashboard 当季推荐已对接 **`GET /api/anime-meta/seasonal-random`**，并支持 **`SeasonalPickDetailDialog`** 详情
-- [ ] 阶段 5+：**Timetable 播出钟点**在数据不全时仍为 **TBD**（暂缓，待数据源或策略）；**整站双语切换**（UI 文案中/英，详见 `TASK_PROGRESS.md` **§4.9**）；用户认证与多用户数据隔离
+- [x] 阶段 4：**`/timetable`** 与 **`GET /api/anime-meta/timetable`**；Dashboard 当季推荐与 **`SeasonalPickDetailDialog`**
+- [ ] 阶段 5+（**可选 / 锦上添花**）：Timetable **播出钟点 TBD** 与 **Bangumi 缺映射** 的数据完备性（非 UI 截断）；**整站双语**（`TASK_PROGRESS.md` **§4.9**）；**Auth 与多用户**；推荐个性化；广义 UI/UX — 取舍见 **`PROJECT_BLUEPRINT.md` §10.5**
+
+### 后续增量（非课程硬性）
+
+| 优先级 | 方向 |
+|--------|------|
+| 性价比高 | 空态与错误提示、Timetable 页脚对 **TBD / 未映射** 的一句话解释、根 `layout` 的站点标题与描述 |
+| 按需 | 双语（`next-intl` 等）、设计系统、动效、无障碍 |
+| 建议谨慎或搁置 | 并行做 **纯 Jikan 周视图 Schedule 全站**；追求 **零 TBD 排钟** 而无稳定数据源 |
 
 ## 🛠 快速开始（给队友）
 
@@ -141,7 +151,7 @@ node run-contract-test.js
 #### 1) 查看当前镜像进度与 backoff
 
 仪表盘式查询爬取进程可以通过：
-```PowerSchell
+```PowerShell
 curl.exe -s http://localhost:3001/api/bee/status
 ```
 
@@ -152,12 +162,12 @@ curl.exe -s http://localhost:3001/api/bee/status
 
 #### 2) 等 backoff 结束后，手动触发一次播种（轻量、只播种一档）
 
-```PowerSchell
+```PowerShell
 curl.exe -s -X POST http://localhost:3001/api/bee/seed-step
 ```
 
 手动触发一次同步 batch（默认 3 条）
-```PowerSchell
+```PowerShell
 curl.exe -s -X POST "http://localhost:3001/api/bee/sync-step?batchSize=3"
 ```
 

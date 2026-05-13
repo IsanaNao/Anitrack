@@ -18,7 +18,7 @@ import {
   formatYmdBerlin,
   tokyoWallToBerlinClock,
 } from './timetable.util';
-import { resolveTimetableAirTimeRaw } from './timetable-air-resolve';
+import { resolveTimetableAirTimeRaw, resolveTimetableWeekdayBangumi } from './timetable-air-resolve';
 
 const TIMETABLE_TZ = 'Europe/Berlin';
 
@@ -406,18 +406,26 @@ export class AnimeMetaService {
   }
 
   /**
-   * 7/14 日横向时间表：基于 `AnimeMirror`（当季 + 已映射 Bangumi）与东京墙钟 → `Europe/Berlin` 展示。
+   * 7/14 日横向时间表：基于 `AnimeMirror`（当季）与东京墙钟 → `Europe/Berlin` 展示。
+   * 分桶星期：**优先** `bangumi.weekday`（已映射 Bangumi），否则回退 Jikan `broadcast.day` / `broadcast.string`，避免「能搜到、无 bgmId 就不出现」的断层。
    */
   async getTimetable(daysInput: number) {
     const days = Math.min(14, Math.max(1, Math.floor(daysInput) || 7));
-    const mirrors = await this.mirrorModel
+    const rawMirrors = await this.mirrorModel
       .find({
         tier: 'seasonal',
         malId: { $gt: 0 },
-        bgmId: { $exists: true, $ne: null },
-        'bangumi.weekday': { $exists: true, $type: 'number' },
       })
       .lean();
+
+    const mirrors = rawMirrors.filter((m) => {
+      const inner = (m.data as { data?: Record<string, unknown> } | undefined)?.data;
+      const w = resolveTimetableWeekdayBangumi({
+        bangumi: (m.bangumi ?? null) as { weekday?: unknown } | null,
+        jikanInner: inner && typeof inner === 'object' ? inner : undefined,
+      });
+      return typeof w === 'number';
+    });
 
     const daysOut: Array<{
       date: string;
@@ -451,9 +459,12 @@ export class AnimeMetaService {
 
       const items: TimetableItemOut[] = [];
       for (const m of mirrors) {
-        const wd = m.bangumi?.weekday;
-        if (typeof wd !== 'number' || wd !== jbgm) continue;
         const inner = (m.data as { data?: Record<string, unknown> } | undefined)?.data;
+        const wd = resolveTimetableWeekdayBangumi({
+          bangumi: (m.bangumi ?? null) as { weekday?: unknown } | null,
+          jikanInner: inner && typeof inner === 'object' ? inner : undefined,
+        });
+        if (typeof wd !== 'number' || wd !== jbgm) continue;
         const imageUrl =
           inner &&
           typeof inner.images === 'object' &&
@@ -494,9 +505,10 @@ export class AnimeMetaService {
           jikanInner: inner && typeof inner === 'object' ? inner : undefined,
         });
         const conv = tokyoWallToBerlinClock(date, airRaw);
+        const bgmNum = Number(m.bgmId);
         items.push({
           malId: m.malId,
-          bgmId: Number(m.bgmId),
+          bgmId: Number.isFinite(bgmNum) && bgmNum > 0 ? bgmNum : 0,
           title,
           titleJp,
           titleEn,

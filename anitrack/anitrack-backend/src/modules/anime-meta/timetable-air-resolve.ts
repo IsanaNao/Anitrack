@@ -47,6 +47,71 @@ export function extractJikanBroadcastTime(
   return undefined;
 }
 
+/** Jikan v4 `broadcast.day` 常见英文；与 Bangumi 对齐：1=周一 … 7=周日。 */
+const JIKAN_DAY_TO_BANGUMI_WEEKDAY: Record<string, number> = {
+  mondays: 1,
+  monday: 1,
+  tuesdays: 2,
+  tuesday: 2,
+  wednesdays: 3,
+  wednesday: 3,
+  thursdays: 4,
+  thursday: 4,
+  fridays: 5,
+  friday: 5,
+  saturdays: 6,
+  saturday: 6,
+  sundays: 7,
+  sunday: 7,
+  月曜日: 1,
+  火曜日: 2,
+  水曜日: 3,
+  木曜日: 4,
+  金曜日: 5,
+  土曜日: 6,
+  日曜日: 7,
+};
+
+/**
+ * 从 Jikan 条目解析「放送星期」（Bangumi 同构 1–7）。`Unknown` / 未放送 / 缺失 → `undefined`。
+ */
+export function extractJikanBroadcastWeekday(
+  inner: Record<string, unknown> | undefined,
+): number | undefined {
+  if (!inner) return undefined;
+  const br = inner.broadcast;
+  if (!br || typeof br !== 'object') return undefined;
+  const o = br as Record<string, unknown>;
+  const day = typeof o.day === 'string' ? o.day.trim() : '';
+  if (day) {
+    const k = day.toLowerCase();
+    if (!k || k === 'unknown' || k.includes('not scheduled')) return undefined;
+    if (k in JIKAN_DAY_TO_BANGUMI_WEEKDAY) return JIKAN_DAY_TO_BANGUMI_WEEKDAY[k];
+    if (day in JIKAN_DAY_TO_BANGUMI_WEEKDAY) return JIKAN_DAY_TO_BANGUMI_WEEKDAY[day];
+  }
+  const str = typeof o.string === 'string' ? o.string : '';
+  if (str) {
+    const low = str.toLowerCase();
+    for (const [key, num] of Object.entries(JIKAN_DAY_TO_BANGUMI_WEEKDAY)) {
+      if (key.length >= 6 && low.includes(key)) return num;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 时间表分桶用星期：**优先**已映射的 `bangumi.weekday`，否则回退 Jikan `broadcast.day`。
+ * （搜索能见到的番剧在当季镜像里常有 Jikan `data`，但可能尚未匹配 Bangumi → 无 `bgmId`。）
+ */
+export function resolveTimetableWeekdayBangumi(args: {
+  bangumi?: { weekday?: unknown } | null;
+  jikanInner?: Record<string, unknown> | null;
+}): number | undefined {
+  const wd = args.bangumi?.weekday;
+  if (typeof wd === 'number' && wd >= 1 && wd <= 7) return Math.trunc(wd);
+  return extractJikanBroadcastWeekday(args.jikanInner ?? undefined);
+}
+
 export function resolveTimetableAirTimeRaw(args: {
   bangumi?: Record<string, unknown> | null;
   jikanInner?: Record<string, unknown> | null;

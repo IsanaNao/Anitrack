@@ -126,6 +126,7 @@ export type AnimeMetaSeasonalRandomResponse = {
 
 export type TimetableItemApi = {
   malId: number;
+  /** Bangumi subject id；未映射时为 `0`（条目仍可凭 Jikan `broadcast` 出现在时间表） */
   bgmId: number;
   /** 英文优先（来自 Bangumi `name_en` / Jikan `title_english` 等），供时间表页展示 */
   title: string;

@@ -7,15 +7,12 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：阶段 5+（增量交付）：Dashboard / Profile / Library 成熟；**Timetable 已接真实 API**；**播出钟点 TBD** 暂缓（待数据源或产品策略）
-- **正在做**：—（文档同步：记录 Timetable 契约与已知限制）
-- **下一步**：
-  - **Timetable 播出时间**：在 Bangumi/Jikan 侧有可靠 `airTime` 或备选字段前保持 **TBD** 空态可接受；后续可评估 subject 补全、二次 enrich、或 Jikan broadcast 解析等
-  - 推荐：在现有「镜像 `$sample` 随机当季」基础上，可选升级为每日个性化（结合 `AnimeEntry` / 标签偏好等；读路径仍以 Mirror 为主）
-  - Bee 镜像系统：在开发环境持续镜像 Jikan 元数据到 Atlas `AnimeMirror`；Bangumi 映射 / enrich 继续跑通映射覆盖率
-  - Auth：替换 `TEMP_USER_ID`（JWT/Session）
-- **阻塞/风险**：Auth 未接入前，`CurrentUser` 仍会回退到 `TEMP_USER_ID`（技术债，见下）
-- **最后更新时间**：2026-05-13
+- **当前阶段**：**课程规划内的核心功能已全部交付**；当前仓库处于「可演示 / 可交付」状态
+- **增量阶段（锦上添花）**：双语 UI（§4.9）、Auth、推荐算法、Timetable 数据「零缺口」、纯 Jikan Schedule 第二视图、广义 UI/UX — **非硬性**，取舍见 **`PROJECT_BLUEPRINT.md` §10.5** 与本文 **§11**
+- **正在做**：—
+- **下一步（按兴趣选做）**：见 **§11** 表格
+- **阻塞/风险**：无课程级阻塞；**`TEMP_USER_ID`** 在接入 Auth 前仍为技术债（见 §9）
+- **最后更新时间**：2026-05-14
 
 ---
 
@@ -85,7 +82,7 @@
 
 ---
 
-## 4. 阶段 3：前端渲染（TODO）
+## 4. 阶段 3：前端渲染（**核心项：已完成**；下列勾选为历史清单）
 
 ### 4.0 数据库重构（Ownership / 双表拆分）
 - [x] 新增 `AnimeMeta`（公有元数据缓存）：以 `malId` 作为全局唯一键，缓存 Jikan 元数据（cache-aside）
@@ -95,13 +92,13 @@
 - [x] `Stats/heatmap` 聚合：首个 `$match` 带 `userId=TEMP_USER_ID`
 
 ### 4.1 UI 基础
-- [ ] Tailwind 配置
+- [x] Tailwind：全局 `globals.css` + 各页 utility 已贯穿（无单独「再配一遍 tailwind.config」任务）
 - [x] 主页面原型（桌面端优先）：搜索 + 添加 + “我的清单”卡片网格（4 列）
 
 ### 4.2 Watchlist
 - [x] 列表渲染（最小版）：`GET /api/anime` 拉取并以卡片网格展示
 - [x] 创建交互（最小版）：从搜索结果 “添加” → `POST /api/anime { malId }`
-- [ ] CRUD 完整交互：编辑/删除/状态迁移 UI（下一步）
+- [x] CRUD 完整交互：Library **全局 Dialog** 编辑/删除/状态迁移 + `invalidateQueries(["anime"])`
 
 ### 4.3 Heatmap（绿墙）
 ### 4.3 人生纸格（月 Heatmap）
@@ -130,10 +127,10 @@
 - [ ] 推荐增强（可选）：每日个性化 / Library 标签加权等
 
 ### 4.7 Timetable（新番时间表）
-- [x] 后端：`GET /api/anime-meta/timetable?days=` — `AnimeMirror`（`tier=seasonal`，已映射 `bgmId` + `bangumi.weekday`）按柏林日历日分列；东京墙钟 → `Europe/Berlin`（`timetable.util`）；条目含 `synopsisEn`/`synopsisJa`（Jikan 镜像）、`episodeLabel: "Seasonal"`、标题英文优先
-- [x] 后端：`normalizeBangumiWallClock`（`HH:mm` / `HHmm`）+ 写入/读取链路；**仍有不少条目无 `airTimeLocal`（前端 TBD）** — **暂缓专项**
-- [x] 前端：`/timetable` 真实数据、横向日期列、7/14 天、点击 **`TimetableItemDetailDialog`**（修复 Bangumi ID 展示）；追更 `POST /api/anime`；已移除「番剧索引」占位
-- [ ] **后续**：可靠播出钟点（上游 enrich、或备选数据源）
+- [x] 后端：`GET /api/anime-meta/timetable?days=` — 当季 `AnimeMirror`；**星期**优先 `bangumi.weekday`，否则 **Jikan `broadcast.day` / `string`**；柏林日历列 + 东京墙钟 → `Europe/Berlin`；未映射 Bangumi 时 **`bgmId` 可为 `0`**
+- [x] 后端：`normalizeBangumiWallClock` + `airDate` / `broadcast` 兜底；**仍有不少条目无 `airTimeLocal`（前端 TBD）** — **数据侧暂缓**，非 UI 截断
+- [x] 前端：`/timetable` 真实数据、横向日期列、7/14 天、列 **`items-start`** 全量列表；**`TimetableItemDetailDialog`**；追更 `POST /api/anime`；已移除「番剧索引」占位
+- [ ] **后续（可选）**：更强 enrich、第三方放送表、或接受部分 **TBD / 缺列**（见 Blueprint §10.5）
 
 ### 4.8 Bee（Anime Mirror System，后台镜像同步）
 - [x] 新增 `Bee` 模块：`src/modules/bee/*`（Cron + 受控速率抓取）
@@ -226,6 +223,11 @@
   - `README.md`、`TASK_PROGRESS.md`：契约说明、当季推荐详情 Dialog
   - `anitrack-backend/swagger.json`：补充 **`GET /api/bee/status`**、**`GET /api/bee/bangumi-mapping`**、**`GET /api/anime-meta/seasonal-random`**、**`GET /api/anime-meta/timetable`**（与契约冒烟 **GET-only** 策略一致；**POST** 端点仍以 Blueprint 为准）
 
+- **2026-05-14（文档：核心闭环 vs 锦上添花）**：
+  - `PROJECT_BLUEPRINT.md`：§1.2 / §3.8.6 / §3.9.11 / §7.2 Timetable 与实现对齐；§8 阶段 3 标为已完成；**新增 §10.5**（未开发 / 建议开发 / 建议放弃）
+  - `README.md`：里程碑说明、路线图阶段 5+ 改为可选、**后续增量**小表、修正 Bee Runbook 代码块 `PowerShell`、Timetable 描述（Jikan 星期兜底、`bgmId=0`）
+  - `TASK_PROGRESS.md`：§0 当前状态、§4.1/4.2/4.7 勾选与表述；**新增 §11**
+
 
 ## 9. 技术债务（Tech Debt）
 
@@ -271,3 +273,18 @@
 - `api-test-suite/`：
   - `node run-all.js`：HTTP smoke + batch（注意 `BASE_URL` 默认 `http://localhost:3000/api`；直连 NestJS 时请改为 `http://localhost:3001/api`）
   - `node heatmap-seeder.js`：热力图播种（不清库、可重复跑）
+
+---
+
+## 11. 核心已交付 vs 锦上添花（与 Blueprint §10.5 对齐）
+
+> **核心（课程启动期望）**：已在仓库闭环 — Watchlist CRUD、统计/热力图/Activity、Jikan 搜索 + `AnimeMeta`、Bee `AnimeMirror`、Dashboard / Library / Profile、当季随机推荐 + 详情 Dialog、Timetable（Bangumi 为主 + Jikan 星期兜底）、契约测试与后端 Jest 基线。
+
+| 分类 | 说明 |
+|------|------|
+| **尚未开发（可选）** | **§4.9 整站双语**；**Auth / 多用户**（§6）；**推荐个性化**（§4.6 未勾选项）；**Timetable 零 TBD / 全映射**（数据专项）；**swagger 全量含 Bee POST**（需先改契约冒烟） |
+| **建议开发（性价比高）** | 页脚/空态里解释 **TBD、`bgmId=0`**；统一间距与错误文案；`app/layout.tsx` 站点 metadata |
+| **建议放弃或长期搁置** | **独立纯 Jikan `/schedule` 全站周视图**（与现行 Timetable 路线重复、429 成本高）；**无稳定源前提下追求排钟 100% 准确**；**过早全自动 OpenAPI 生成** |
+| **保持现状** | 单用户 `TEMP_USER_ID`；Bee 65s/3 条；柏林时区时间表；英文优先标题 |
+
+详细表格式叙述以 **`PROJECT_BLUEPRINT.md` §10.5** 为准（本表为速查）。

@@ -96,11 +96,16 @@ export type AnimeStatus =
 export interface AnimeMeta {
   malId: number;
   title: string;
+  /** Bangumi 映射中文名（可选） */
+  titleCn?: string;
+  titleJp?: string;
+  titleEn?: string;
   imageUrl?: string;
   episodes?: number;
   totalEpisodes?: number;
   score?: number;
   synopsis?: string;
+  synopsisCn?: string;
   genres?: string[];
 }
 
@@ -130,11 +135,14 @@ export type TimetableItemApi = {
   bgmId: number;
   /** 英文优先（来自 Bangumi `name_en` / Jikan `title_english` 等），供时间表页展示 */
   title: string;
+  titleCn?: string;
   titleJp?: string;
   titleEn?: string;
   imageUrl?: string;
   airTimeLocal?: string;
   nextAirAtIso?: string;
+  /** Bangumi 中文简介（已映射时） */
+  synopsisCn?: string;
   /** Jikan 简介，多为英文 */
   synopsisEn?: string;
   /** 以假名为主的简介（来自 Jikan synopsis 启发式分类） */
@@ -208,13 +216,21 @@ export async function getSeasonalRandomPicks(params?: {
 }
 
 export async function getTimetable(params?: {
+  /** @deprecated 仅向未来；请用 pastDays + futureDays */
   days?: number;
+  pastDays?: number;
+  futureDays?: number;
 }): Promise<TimetableResponse> {
   const qs = new URLSearchParams();
   if (params?.days != null) qs.set("days", String(params.days));
+  if (params?.pastDays != null) qs.set("pastDays", String(params.pastDays));
+  if (params?.futureDays != null) qs.set("futureDays", String(params.futureDays));
   const suffix = qs.size ? `?${qs.toString()}` : "";
   return fetcher<TimetableResponse>(`/anime-meta/timetable${suffix}`);
 }
+
+/** 时间表日期窗口：柏林时区前后各 N 天（与后端上限一致） */
+export const TIMETABLE_WINDOW_DAYS = 14;
 
 export async function searchAnimeMeta(params: {
   q: string;

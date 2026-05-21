@@ -71,5 +71,24 @@ export class BeeController {
   async bangumiMapNow() {
     return this.bee.triggerBangumiMapNow();
   }
+
+  @Post('map-mal-ids')
+  @ApiOperation({
+    summary:
+      'On-demand Bangumi search mapping for library titles (comma-separated malIds). Persists mirror titles; call anime-meta read paths to sync AnimeMeta.',
+  })
+  async mapMalIds(@Query('malIds') malIdsRaw?: string) {
+    const malIds = String(malIdsRaw ?? '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (!malIds.length) {
+      return { attempted: 0, mapped: 0, malIds: [] };
+    }
+    return this.bee.ensureBangumiMappingsForMalIds(malIds, {
+      max: Math.min(20, malIds.length),
+      delayMs: 400,
+    });
+  }
 }
 

@@ -144,6 +144,10 @@ export class AnimeService implements OnModuleInit {
         completedAt,
         completedDates,
       });
+      void this.animeMeta
+        .ensureI18nForMalIds([dto.malId])
+        .catch(() => undefined);
+
       const json = created.toJSON() as any;
       json.animeMeta = meta;
       return json;

@@ -6,6 +6,35 @@ const { validateObjectKeysAgainstSchema } = require("./lib/shape-validate");
 
 const SAMPLE_OBJECT_ID = "507f1f77bcf86cd799439011";
 
+const PATH_HTTP_METHODS = ["get", "post", "put", "patch", "delete"];
+
+/**
+ * Default query/body for smoke probes (keep side effects small).
+ * @param {string} path
+ * @param {string} method
+ */
+function smokeRequestOptions(path, method) {
+  const m = method.toLowerCase();
+  if (path === "/api/bee/sync-step" && m === "post") {
+    return { query: "batchSize=1" };
+  }
+  return {};
+}
+
+/**
+ * @param {string} origin
+ * @param {string} expandedPath
+ * @param {string} method
+ * @param {{ query?: string }} opts
+ */
+function smokeUrl(origin, expandedPath, method, opts = {}) {
+  let url = `${origin}${expandedPath}`;
+  if (opts.query) {
+    url += expandedPath.includes("?") ? `&${opts.query}` : `?${opts.query}`;
+  }
+  return url;
+}
+
 /**
  * @param {object} spec
  * @param {string} pathTemplate
@@ -99,45 +128,84 @@ async function checkPathsExist(spec, origin) {
 
   const pathKeys = Object.keys(spec.paths || {});
   for (const p of pathKeys) {
-    const expanded = expandPath(p);
-    const url = `${origin}${expanded}`;
-    const { res, isJson, contentType } = await request("GET", url);
+    const pathItem = spec.paths[p];
+    const methods = PATH_HTTP_METHODS.filter((m) => pathItem?.[m]);
+    if (!methods.length) {
+      errors.push(`路径 ${p}: OpenAPI paths 中未声明任何 HTTP 方法`);
+      continue;
+    }
 
     const isPending = pending.has(p);
+    const expanded = expandPath(p);
 
-    if (res.ok) {
-      if (!isJson) {
-        errors.push(`路径 ${p}: HTTP 200 但响应非 JSON（Content-Type=${contentType || "(空)"}）`);
+    for (const method of methods) {
+      const httpMethod = method.toUpperCase();
+      const reqOpts = smokeRequestOptions(p, method);
+      const url = smokeUrl(origin, expanded, method, reqOpts);
+      const { res, isJson, contentType } = await request(httpMethod, url);
+
+      if (res.ok) {
+        /** 204 No Content（如 DELETE）无 JSON body，仍视为端点存在 */
+        if (res.status === 204) {
+          continue;
+        }
+        if (!isJson) {
+          errors.push(
+            `路径 ${p} ${httpMethod}: HTTP 2xx 但响应非 JSON（Content-Type=${contentType || "(空)"}）`,
+          );
+        }
+        continue;
       }
-      continue;
-    }
 
-    if (res.status === 405) {
-      /** Next 对个别方法可能 405；换 HEAD 再试一次 */
-      const head = await request("HEAD", url);
-      if (!head.res.ok && head.res.status !== 404) {
-        errors.push(`路径 ${p}: HEAD ${head.res.status}（GET 已 405）`);
+      if (res.status === 405) {
+        errors.push(`路径 ${p}: ${httpMethod} 返回 405 Method Not Allowed`);
+        continue;
       }
-      continue;
-    }
 
-    if (!isJson && res.status >= 400) {
-      const looksLikeNextHtml = (contentType || "").includes("text/html");
-      if (isPending && res.status === 404 && looksLikeNextHtml) {
-        warnings.push(
-          `路径 ${p}: 尚未实现或返回 Next.js HTML 404（列入 CONTRACT_PENDING_PATHS，仅警告）`,
+      /** Bee/Jikan 手动步进可能 429；仍视为路由存在 */
+      if (res.status === 429 && isJson) {
+        warnings.push(`路径 ${p} ${httpMethod}: HTTP 429（限流，路由存在）`);
+        continue;
+      }
+
+      if (!isJson && res.status >= 400) {
+        const looksLikeNextHtml = (contentType || "").includes("text/html");
+        if (isPending && res.status === 404 && looksLikeNextHtml) {
+          warnings.push(
+            `路径 ${p} ${httpMethod}: 尚未实现或返回 Next.js HTML 404（列入 CONTRACT_PENDING_PATHS，仅警告）`,
+          );
+          continue;
+        }
+        errors.push(
+          `路径 ${p} ${httpMethod} ${url}: 期望 JSON 错误体或成功体，得到 HTTP ${res.status}, Content-Type=${contentType || "(空)"}`,
         );
         continue;
       }
-      errors.push(
-        `路径 ${p}: GET ${url} 期望 JSON 错误体或成功体，得到 HTTP ${res.status}, Content-Type=${contentType || "(空)"}`,
-      );
-      continue;
-    }
 
-    if (res.status >= 500) {
-      errors.push(`路径 ${p}: 服务端错误 HTTP ${res.status}（请确认 MongoDB 与 .env.local）`);
-      continue;
+      if (res.status === 404) {
+        /** 带 JSON 错误体的 404 = 路由存在、资源不存在（如随机 ObjectId） */
+        if (isJson) {
+          continue;
+        }
+        if (isPending) {
+          warnings.push(`路径 ${p} ${httpMethod}: HTTP 404（CONTRACT_PENDING_PATHS，仅警告）`);
+        } else {
+          errors.push(`路径 ${p} ${httpMethod}: HTTP 404（路由未注册或前缀错误）`);
+        }
+        continue;
+      }
+
+      if (res.status >= 500) {
+        errors.push(
+          `路径 ${p} ${httpMethod}: 服务端错误 HTTP ${res.status}（请确认 MongoDB 与后端 .env）`,
+        );
+        continue;
+      }
+
+      /** 其它 4xx 且 JSON 错误信封：视为端点存在（如校验失败） */
+      if (res.status >= 400 && isJson) {
+        continue;
+      }
     }
   }
 
@@ -344,7 +412,7 @@ async function run(opts = {}) {
 }
 
 async function main() {
-  console.log(bold("\n━━ 契约冒烟（路径 / 字段 / 409 / pageSize 上限）━━"));
+  console.log(bold("\n━━ 契约冒烟（路径·按 OpenAPI 方法 / 字段 / 409 / pageSize 上限）━━"));
   console.log(`ORIGIN: ${getOrigin()}`);
   console.log(`Swagger: ${getSwaggerUrl()}`);
   console.log(`PENDING_PATHS: ${getPendingPaths().join(", ") || "(无)"}\n`);

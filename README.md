@@ -2,7 +2,7 @@
 
 基于 **Next.js（前端）+ NestJS（后端）+ MongoDB** 的番剧进度管理系统，支持自动化热力图统计与多维契约测试。
 
-> **里程碑（2026-05-14）**：课程启动时规划的 **Watchlist、统计/热力图、Jikan 搜索与缓存、Bee 镜像、Dashboard / Library / Profile、当季推荐、新番时间表（Bangumi 为主 + Jikan 兜底）** 等能力已在仓库中闭环。后续 **双语 UI、深度 UI/UX、登录多用户、放送数据「零 TBD」** 等均为**锦上添花**，详见根目录 **`PROJECT_BLUEPRINT.md` §10.5** 与 **`TASK_PROGRESS.md` §0 / §11**。
+> **里程碑（2026-05-21）**：在 **2026-05-14 核心闭环** 基础上，已交付 **整站中/英 UI**、**清单 Bangumi 按需中文映射**、**手机/桌面响应式布局**（含时间表日期条 ±2 周）。后续 **登录多用户、放送数据「零 TBD」** 等为**锦上添花**，详见 **`PROJECT_BLUEPRINT.md` §10.5** 与 **`TASK_PROGRESS.md` §4.9 / §4.11**。
 
 ## 🗂️ 仓库结构（双文件夹架构）
 
@@ -28,7 +28,9 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
 - **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
-- **新番时间表（Timetable）**：前端 **`/timetable`** 对接 **`GET /api/anime-meta/timetable`**（7/14 天、`Europe/Berlin` 日期列）；数据来自 **当季 `AnimeMirror`**，**星期**以 Bangumi 为主、**Jikan `broadcast` 为兜底**（未映射 Bangumi 时 `bgmId` 可能为 `0`）。条目可点开详情并 **加入清单** 或编辑已有条目。**已知限制**：部分条目 **缺列或钟点 TBD**（映射失败或上游无可靠时刻），与 UI 高度无关。
+- **新番时间表（Timetable）**：**`/timetable`** — 顶部**可左右滑动的日期条**（柏林时区 **前后各 2 周**），下方为**选中日**的番剧列表（已移除 7/14 天切换）；`GET /api/anime-meta/timetable?pastDays=14&futureDays=14`。数据来自当季 **`AnimeMirror`**；星期以 Bangumi 为主、Jikan 广播字段兜底。**已知限制**：部分条目钟点仍为 **TBD**。
+- **整站双语（i18n）**：导航 **中文 / English**；作品标题/简介按 UI 语言择优（Bangumi `titleCn` 等）。清单老番 **后台 Bangumi 映射**（日志 `[i18n-map]`）；手动 **`POST /api/bee/map-mal-ids?malIds=...`**。见 **`PROJECT_BLUEPRINT.md` §7.5**。
+- **响应式（已完成）**：汉堡菜单、`AnimeCard` 紧凑模式、仪表盘双行横滑、档案热力图固定列宽横向滚动。见 **`TASK_PROGRESS.md` §4.11**。
 - **🐝 Intelligent Data Mirroring（Bee System）**：
   - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
   - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
@@ -38,7 +40,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 
 ### 2) 契约驱动开发（Contract-Driven）
 
-- **OpenAPI / Swagger 3.0**：仓库 **`anitrack/anitrack-backend/swagger.json`** 由 Nest 启动时加载；交互式文档 **`http://localhost:3001/api-docs`**（JSON：**`/swagger.json`**）。`anitrack-tester/contract-validator` 会对 `paths` 里声明的每条路径发 **GET** 做路径存在性冒烟；**仅 POST** 的接口（例如 `POST /api/bee/sync-step`）若未同步调整冒烟逻辑，不宜单独写入 `paths`，参数与语义以 **`PROJECT_BLUEPRINT.md`** 与控制器 `@ApiOperation` 为准。
+- **OpenAPI / Swagger 3.0**：仓库 **`anitrack/anitrack-backend/swagger.json`** 由 Nest 启动时加载；交互式文档 **`http://localhost:3001/api-docs`**。契约已包含 Bee **POST**（`seed-step` / `sync-step` / `bangumi-map`）；冒烟按 OpenAPI **声明的 HTTP 方法**请求（见 **`PROJECT_BLUEPRINT.md` §3.9.12**）。
 - **多层级测试套件**：
   - **Vitest 单元测试**：覆盖核心算法与日期计算
   - **集成测试**：验证 API 与 MongoDB 的真实交互
@@ -64,15 +66,33 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - [x] 阶段 2：统计聚合逻辑与多维自动化测试
 - [x] 阶段 3：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发（Dashboard/The Pulse、Profile Heatmap、Library Dialog）
 - [x] 阶段 4：**`/timetable`** 与 **`GET /api/anime-meta/timetable`**；Dashboard 当季推荐与 **`SeasonalPickDetailDialog`**
-- [ ] 阶段 5+（**可选 / 锦上添花**）：Timetable **播出钟点 TBD** 与 **Bangumi 缺映射** 的数据完备性（非 UI 截断）；**整站双语**（`TASK_PROGRESS.md` **§4.9**）；**Auth 与多用户**；推荐个性化；广义 UI/UX — 取舍见 **`PROJECT_BLUEPRINT.md` §10.5**
+- [x] 阶段 5（体验）：**整站双语**（`TASK_PROGRESS.md` **§4.9**）
+- [x] 阶段 5+（体验）：**响应式布局**（`TASK_PROGRESS.md` **§4.11**）
+- [ ] 阶段 6+（**可选**）：**Auth 与多用户**；推荐个性化；Timetable 数据「零 TBD」专项 — 见 **`PROJECT_BLUEPRINT.md` §10.5**
 
 ### 后续增量（非课程硬性）
 
 | 优先级 | 方向 |
 |--------|------|
-| 性价比高 | 空态与错误提示、Timetable 页脚对 **TBD / 未映射** 的一句话解释、根 `layout` 的站点标题与描述 |
-| 按需 | 双语（`next-intl` 等）、设计系统、动效、无障碍 |
+| 性价比高 | Timetable 页脚对 **TBD / 未映射** 的说明 |
+| 按需 | URL 级 locale（`/en/...`）、设计系统、动效、无障碍 |
 | 建议谨慎或搁置 | 并行做 **纯 Jikan 周视图 Schedule 全站**；追求 **零 TBD 排钟** 而无稳定数据源 |
+
+---
+
+## 📌 下次启动备忘（架构图 & 功能示意图）
+
+> 与 **`TASK_PROGRESS.md` §12** 同步。功能代码本阶段已可演示；**下次打开仓库**建议优先补**图示**（答辩 / 报告 / README 插图），再考虑 §11 中的可选功能。
+
+| 待办 | 说明 |
+|------|------|
+| **架构图** | 客户端 → Next.js → NestJS `:3001` → MongoDB；Bee ↔ Jikan/Bangumi；`AnimeMeta` / `AnimeEntry` / `AnimeMirror` 三集合关系 |
+| **功能示意图** | 用户动线：搜索入库、在看编辑、时间表选日、Profile 热力图点击 |
+| **制图前自检** | 双端 `npm run start:dev` + `npm run dev`；四页中英各走查一遍 |
+
+工具任选：Mermaid（进仓库）、draw.io / Excalidraw / Figma（导出 PNG）。细节清单见 **`TASK_PROGRESS.md` §12**。
+
+---
 
 ## 🛠 快速开始（给队友）
 

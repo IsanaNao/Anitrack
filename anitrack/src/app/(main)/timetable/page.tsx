@@ -1,26 +1,28 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+
 import { AppShell } from "@/components/AppShell";
 import { AnimeEntryDialog } from "@/components/AnimeEntryDialog";
 import { TimetableItemDetailDialog } from "@/components/TimetableItemDetailDialog";
 import type { AnimeEntry } from "@/lib/api";
 import {
   getTimetable,
+  TIMETABLE_WINDOW_DAYS,
   type TimetableDayApi,
   type TimetableItemApi,
 } from "@/lib/api";
-
-/** B 站式 `M-D`（去前导零可选） */
-function formatMdShort(isoDate: string): string {
-  const parts = isoDate.split("-");
-  if (parts.length !== 3) return isoDate;
-  const m = Number(parts[1]);
-  const d = Number(parts[2]);
-  if (!Number.isFinite(m) || !Number.isFinite(d)) return isoDate;
-  return `${m}-${d}`;
-}
+import { useI18n } from "@/i18n/I18nProvider";
+import { useAnimeDisplay } from "@/i18n/useAnimeDisplay";
+import type { createTranslator } from "@/i18n/translate";
 
 function todayYmdBerlin(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -31,65 +33,77 @@ function todayYmdBerlin(): string {
   }).format(new Date());
 }
 
-function countdownLabel(iso?: string): string | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  const diff = t - Date.now();
-  if (diff <= 0) return "已开播";
-  const h = Math.floor(diff / 3_600_000);
-  const m = Math.floor((diff % 3_600_000) / 60_000);
-  if (h >= 72) return `${Math.ceil(h / 24)} 天后`;
-  if (h > 0) return `${h}小时${m}分`;
-  if (m > 0) return `${m}分钟后`;
-  return "即将播出";
+function nowClockBerlin(): string {
+  return new Intl.DateTimeFormat("de-DE", {
+    timeZone: "Europe/Berlin",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
 }
 
-function TimetableRow({ it, onSelect }: { it: TimetableItemApi; onSelect: (it: TimetableItemApi) => void }) {
-  const cd = countdownLabel(it.nextAirAtIso);
-  const hasTime = Boolean(it.airTimeLocal?.trim());
+function countdownLabel(
+  iso: string | undefined,
+  t: ReturnType<typeof createTranslator>,
+): string | null {
+  if (!iso) return null;
+  const target = Date.parse(iso);
+  if (!Number.isFinite(target)) return null;
+  const diff = target - Date.now();
+  if (diff <= 0) return t("timetable.aired");
+  const h = Math.floor(diff / 3_600_000);
+  const m = Math.floor((diff % 3_600_000) / 60_000);
+  if (h >= 72) return t("timetable.inDays", { days: Math.ceil(h / 24) });
+  if (h > 0) return t("timetable.inHours", { hours: h, minutes: m });
+  if (m > 0) return t("timetable.inMinutes", { minutes: m });
+  return t("timetable.airingSoon");
+}
 
-  useEffect(() => {
-    if (process.env.NODE_ENV === "development") {
-      // eslint-disable-next-line no-console -- 排障：确认原始播出串与柏林钟面
-      console.log("[Timetable]", "Original Time:", it.airTime, "Local:", it.airTimeLocal, "malId:", it.malId);
-    }
-  }, [it.airTime, it.airTimeLocal, it.malId]);
+function TimetableRow({
+  it,
+  onSelect,
+  displayTitle,
+  t,
+}: {
+  it: TimetableItemApi;
+  onSelect: (it: TimetableItemApi) => void;
+  displayTitle: string;
+  t: ReturnType<typeof createTranslator>;
+}) {
+  const cd = countdownLabel(it.nextAirAtIso, t);
+  const hasTime = Boolean(it.airTimeLocal?.trim());
+  const episodeLabel =
+    it.episodeLabel === "Seasonal" ? t("timetable.episodeSeasonal") : it.episodeLabel;
 
   return (
     <button
       type="button"
       onClick={() => onSelect(it)}
-      className="group flex w-full cursor-pointer items-center gap-2.5 border-b border-pink-50/90 py-2.5 pr-0.5 text-left transition-colors hover:bg-pink-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 dark:border-zinc-800/90 dark:hover:bg-zinc-900/50"
+      className="group flex w-full cursor-pointer items-center gap-2.5 border-b border-pink-50/90 py-3 pr-0.5 text-left transition-colors hover:bg-pink-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 dark:border-zinc-800/90 dark:hover:bg-zinc-900/50"
     >
       <div className="w-11 shrink-0 text-right font-mono text-[12px] leading-tight tabular-nums text-slate-400 dark:text-zinc-500">
         {hasTime ? (
-          <span className="text-slate-500 dark:text-zinc-400">{it.airTimeLocal}</span>
+          <span className="text-slate-600 dark:text-zinc-300">{it.airTimeLocal}</span>
         ) : (
-          <span className="text-slate-300 dark:text-zinc-600">TBD</span>
+          <span className="text-slate-300 dark:text-zinc-600">{t("common.tbd")}</span>
         )}
       </div>
       <div className="h-[52px] w-[52px] shrink-0 overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200/90 dark:bg-zinc-800 dark:ring-zinc-700">
         {it.imageUrl ? (
-          <img
-            src={it.imageUrl}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
+          <img src={it.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400 dark:text-zinc-600">
-            无封面
+            {t("common.noImage")}
           </div>
         )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium leading-snug text-slate-900 dark:text-zinc-100">
-          {it.title}
+          {displayTitle}
         </div>
         <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-[12px] font-semibold text-[#fb7299] dark:text-rose-400">
-            {it.episodeLabel}
+            {episodeLabel}
           </span>
           {cd ? (
             <span className="text-[11px] text-slate-400 dark:text-zinc-500">{cd}</span>
@@ -100,58 +114,90 @@ function TimetableRow({ it, onSelect }: { it: TimetableItemApi; onSelect: (it: T
   );
 }
 
-function DayColumn({
-  day,
-  isToday,
-  onSelectItem,
-}: {
-  day: TimetableDayApi;
-  isToday: boolean;
-  onSelectItem: (it: TimetableItemApi) => void;
-}) {
+function NowMarker({ time, t }: { time: string; t: ReturnType<typeof createTranslator> }) {
   return (
-    <div className="w-[200px] shrink-0 sm:w-[220px]">
-      <div
-        className={`mb-2 flex flex-col items-center gap-0.5 rounded-xl px-2 py-2.5 text-center ${
-          isToday
-            ? "bg-sky-50 ring-1 ring-sky-100 dark:bg-sky-950/35 dark:ring-sky-900/80"
-            : "bg-slate-50/80 dark:bg-zinc-900/40"
-        }`}
-      >
-        <span className="text-base leading-none opacity-90" aria-hidden>
-          📺
-        </span>
-        <span className="font-mono text-[15px] font-semibold tracking-tight text-slate-800 dark:text-zinc-100">
-          {formatMdShort(day.date)}
-        </span>
-        <span className="text-[12px] text-slate-500 dark:text-zinc-400">{day.weekdayLabel}</span>
-      </div>
-
-      {day.items.length === 0 ? (
-        <div className="flex min-h-[200px] flex-col items-center justify-center rounded-xl bg-gradient-to-b from-slate-50 to-white px-3 py-8 text-center text-[12px] leading-relaxed text-slate-400 dark:from-zinc-900 dark:to-zinc-950 dark:text-zinc-500">
-          本日暂无
-          <br />
-          已映射条目
-        </div>
-      ) : (
-        <div className="rounded-xl bg-white/60 dark:bg-transparent">
-          {day.items.map((it) => (
-            <TimetableRow key={`${day.date}-${it.malId}`} it={it} onSelect={onSelectItem} />
-          ))}
-        </div>
-      )}
+    <div
+      className="flex items-center gap-2 border-b border-violet-200/80 py-2 dark:border-violet-900/60"
+      aria-label={t("timetable.nowMarker", { time })}
+    >
+      <span className="text-violet-500 dark:text-violet-400" aria-hidden>
+        🕐
+      </span>
+      <span className="font-mono text-[12px] font-semibold tabular-nums text-violet-600 dark:text-violet-400">
+        {t("timetable.nowMarker", { time })}
+      </span>
+      <div className="h-px flex-1 bg-violet-300/80 dark:bg-violet-800/80" />
     </div>
   );
 }
 
+function DaySchedule({
+  day,
+  isToday,
+  onSelectItem,
+  titleFor,
+  t,
+}: {
+  day: TimetableDayApi;
+  isToday: boolean;
+  onSelectItem: (it: TimetableItemApi) => void;
+  titleFor: (it: TimetableItemApi) => string;
+  t: ReturnType<typeof createTranslator>;
+}) {
+  const emptyLines = t("timetable.emptyDay").split("\n");
+  const nowClock = nowClockBerlin();
+
+  if (day.items.length === 0) {
+    return (
+      <div className="flex min-h-[180px] flex-col items-center justify-center px-4 py-10 text-center text-[13px] leading-relaxed text-slate-400 dark:text-zinc-500">
+        {emptyLines.map((line, i) => (
+          <span key={i}>
+            {line}
+            {i < emptyLines.length - 1 ? <br /> : null}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  const rows: ReactNode[] = [];
+  let nowInserted = false;
+
+  for (const it of day.items) {
+    const clock = it.airTimeLocal?.trim() ?? "";
+    if (isToday && !nowInserted && clock && clock.localeCompare(nowClock) > 0) {
+      rows.push(<NowMarker key="now-marker" time={nowClock} t={t} />);
+      nowInserted = true;
+    }
+    rows.push(
+      <TimetableRow
+        key={`${day.date}-${it.malId}`}
+        it={it}
+        onSelect={onSelectItem}
+        displayTitle={titleFor(it)}
+        t={t}
+      />,
+    );
+  }
+
+  if (isToday && !nowInserted) {
+    rows.push(<NowMarker key="now-marker-end" time={nowClock} t={t} />);
+  }
+
+  return <div className="rounded-xl bg-white dark:bg-transparent">{rows}</div>;
+}
+
 export default function TimetablePage() {
-  const [range, setRange] = useState<"7d" | "14d">("7d");
+  const { t } = useI18n();
+  const { title: pickTitle } = useAnimeDisplay();
+  const todayIso = todayYmdBerlin();
+  const [selectedDate, setSelectedDate] = useState(todayIso);
   const [previewItem, setPreviewItem] = useState<TimetableItemApi | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [libraryEntry, setLibraryEntry] = useState<AnimeEntry | null>(null);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
-  const daysCount = range === "14d" ? 14 : 7;
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const dateStripRef = useRef<HTMLDivElement>(null);
+  const dateBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -160,15 +206,49 @@ export default function TimetablePage() {
   }, []);
 
   const q = useQuery({
-    queryKey: ["anime-meta", "timetable", daysCount],
-    queryFn: () => getTimetable({ days: daysCount }),
+    queryKey: ["anime-meta", "timetable", TIMETABLE_WINDOW_DAYS],
+    queryFn: () =>
+      getTimetable({
+        pastDays: TIMETABLE_WINDOW_DAYS,
+        futureDays: TIMETABLE_WINDOW_DAYS,
+      }),
   });
 
-  const todayIso = todayYmdBerlin();
+  const dayByDate = useMemo(() => {
+    const m = new Map<string, TimetableDayApi>();
+    for (const d of q.data?.days ?? []) m.set(d.date, d);
+    return m;
+  }, [q.data?.days]);
 
-  const scrollBy = useCallback((delta: number) => {
-    scrollRef.current?.scrollBy({ left: delta, behavior: "smooth" });
+  const orderedDays = q.data?.days ?? [];
+
+  useEffect(() => {
+    if (!orderedDays.length) return;
+    if (!dayByDate.has(selectedDate)) {
+      const fallback =
+        orderedDays.find((d) => d.date === todayIso)?.date ?? orderedDays[0]?.date;
+      if (fallback) setSelectedDate(fallback);
+    }
+  }, [orderedDays, dayByDate, selectedDate, todayIso]);
+
+  const scrollDateIntoView = useCallback((date: string) => {
+    const btn = dateBtnRefs.current.get(date);
+    const strip = dateStripRef.current;
+    if (!btn || !strip) return;
+    const left = btn.offsetLeft - strip.clientWidth / 2 + btn.clientWidth / 2;
+    strip.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
   }, []);
+
+  useEffect(() => {
+    if (!q.data?.days.length) return;
+    scrollDateIntoView(selectedDate);
+  }, [q.data?.days, selectedDate, scrollDateIntoView]);
+
+  const selectedDay = dayByDate.get(selectedDate);
+  const titleFor = (it: TimetableItemApi) => pickTitle(it, it.malId);
+
+  const loadErr = (err: unknown) =>
+    `${t("common.loadFailed")}: ${err instanceof Error ? err.message : t("common.unknownError")}`;
 
   return (
     <AppShell>
@@ -193,93 +273,97 @@ export default function TimetablePage() {
         entry={libraryEntry}
       />
 
-      <div className="rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-zinc-800">
-          <div className="flex items-end gap-6 text-sm">
-            <span className="border-b-2 border-sky-400 pb-0.5 font-semibold text-slate-800 dark:border-sky-500 dark:text-zinc-100">
-              新番时间表
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 rounded-lg bg-slate-100 p-0.5 dark:bg-zinc-900">
-            <button
-              type="button"
-              onClick={() => setRange("7d")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                range === "7d"
-                  ? "bg-white text-sky-600 shadow-sm dark:bg-zinc-800 dark:text-sky-400"
-                  : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-              }`}
-            >
-              7 天
-            </button>
-            <button
-              type="button"
-              onClick={() => setRange("14d")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                range === "14d"
-                  ? "bg-white text-sky-600 shadow-sm dark:bg-zinc-800 dark:text-sky-400"
-                  : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-              }`}
-            >
-              14 天
-            </button>
-          </div>
+      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="border-b border-slate-100 px-4 py-3 dark:border-zinc-800">
+          <h1 className="text-base font-semibold text-slate-900 dark:text-zinc-100">
+            {t("timetable.title")}
+          </h1>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">
+            {t("timetable.dateRangeHint", { weeks: 2 })}
+          </p>
         </div>
 
-        <div className="relative">
-          <button
-            type="button"
-            aria-label="向左滚动"
-            onClick={() => scrollBy(-320)}
-            className="absolute left-1 top-1/2 z-10 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-lg text-slate-500 shadow-sm hover:bg-slate-50 md:flex dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            aria-label="向右滚动"
-            onClick={() => scrollBy(320)}
-            className="absolute right-1 top-1/2 z-10 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-lg text-slate-500 shadow-sm hover:bg-slate-50 md:flex dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            ›
-          </button>
-
-          {q.isLoading ? (
-            <div className="px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">加载中…</div>
-          ) : q.isError ? (
-            <div className="px-4 py-10 text-center text-sm text-red-600 dark:text-red-300">
-              加载失败：{q.error instanceof Error ? q.error.message : "unknown"}
-            </div>
-          ) : !q.data?.days.length ? (
-            <div className="px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">暂无数据</div>
-          ) : (
+        {q.isLoading ? (
+          <div className="px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">
+            {t("common.loading")}
+          </div>
+        ) : q.isError ? (
+          <div className="px-4 py-10 text-center text-sm text-red-600 dark:text-red-300">
+            {loadErr(q.error)}
+          </div>
+        ) : !orderedDays.length ? (
+          <div className="px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">
+            {t("common.noData")}
+          </div>
+        ) : (
+          <>
             <div
-              ref={scrollRef}
-              className="overflow-x-auto scroll-smooth px-3 pb-4 pt-3 sm:px-10 [scrollbar-width:thin]"
+              ref={dateStripRef}
+              className="flex gap-1 overflow-x-auto overscroll-x-contain border-b border-slate-100 px-2 py-2 [scrollbar-width:thin] dark:border-zinc-800"
+              role="tablist"
+              aria-label={t("timetable.pickDay")}
             >
-              <div className="inline-flex min-h-[200px] items-start divide-x divide-dashed divide-slate-200 dark:divide-zinc-800">
-                {q.data.days.map((day) => (
-                  <DayColumn
+              {orderedDays.map((day) => {
+                const active = day.date === selectedDate;
+                const isToday = day.date === todayIso;
+                return (
+                  <button
                     key={day.date}
-                    day={day}
-                    isToday={day.date === todayIso}
-                    onSelectItem={(it) => {
-                      setPreviewItem(it);
-                      setPreviewOpen(true);
+                    ref={(el) => {
+                      if (el) dateBtnRefs.current.set(day.date, el);
+                      else dateBtnRefs.current.delete(day.date);
                     }}
-                  />
-                ))}
-              </div>
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setSelectedDate(day.date)}
+                    className={
+                      "flex min-w-[3.25rem] shrink-0 flex-col items-center rounded-lg px-2.5 py-2 transition-colors " +
+                      (active
+                        ? "bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"
+                        : "text-slate-600 hover:bg-slate-50 dark:text-zinc-400 dark:hover:bg-zinc-900")
+                    }
+                  >
+                    <span
+                      className={
+                        "font-mono text-[13px] font-semibold tabular-nums " +
+                        (active ? "text-violet-700 dark:text-violet-300" : "")
+                      }
+                    >
+                      {day.dateLabel}
+                    </span>
+                    <span className="mt-0.5 text-[11px]">{day.weekdayLabel}</span>
+                    {isToday ? (
+                      <span className="mt-1 text-[10px] font-medium text-violet-500 dark:text-violet-400">
+                        {t("timetable.today")}
+                      </span>
+                    ) : (
+                      <span className="mt-1 h-[14px]" aria-hidden />
+                    )}
+                  </button>
+                );
+              })}
             </div>
-          )}
-        </div>
+
+            {selectedDay ? (
+              <DaySchedule
+                day={selectedDay}
+                isToday={selectedDay.date === todayIso}
+                onSelectItem={(it) => {
+                  setPreviewItem(it);
+                  setPreviewOpen(true);
+                }}
+                titleFor={titleFor}
+                t={t}
+              />
+            ) : null}
+          </>
+        )}
 
         <p className="border-t border-slate-100 px-4 py-2.5 text-center text-[11px] leading-relaxed text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
-          数据来自已映射 Bangumi 的当季镜像 · 时间已换算为{" "}
-          <span className="font-medium text-slate-500 dark:text-zinc-400">
-            {q.data?.timezone ?? "Europe/Berlin"}
-          </span>{" "}
-          （德国中部时区）· 点击条目可查看简介并加入追番清单
+          {t("timetable.footer", {
+            timezone: q.data?.timezone ?? "Europe/Berlin",
+          })}
         </p>
       </div>
     </AppShell>

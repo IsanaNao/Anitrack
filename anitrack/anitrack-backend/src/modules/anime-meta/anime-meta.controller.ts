@@ -33,11 +33,29 @@ export class AnimeMetaController {
     return this.animeMeta.randomSeasonalFromMirror(capped);
   }
 
-  /** 周视图时间表：`Europe/Berlin`（CEST/CET）展示；数据来自已映射 Bangumi 的当季镜像。 */
+  /**
+   * 周视图时间表：`Europe/Berlin` 展示。
+   * 默认 `pastDays=14` & `futureDays=14`（前后各两周）；旧客户端可继续传 `days`（仅向未来）。
+   */
   @Get('timetable')
   async timetable(
-    @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
+    @Query('days') days?: string,
+    @Query('pastDays') pastDaysRaw?: string,
+    @Query('futureDays') futureDaysRaw?: string,
   ) {
-    return this.animeMeta.getTimetable(days);
+    const legacyRaw = days != null ? String(days).trim() : '';
+    const pastRaw = pastDaysRaw != null ? String(pastDaysRaw).trim() : '';
+    const futureRaw = futureDaysRaw != null ? String(futureDaysRaw).trim() : '';
+    const useLegacy =
+      legacyRaw !== '' && pastRaw === '' && futureRaw === '';
+    if (useLegacy) {
+      return this.animeMeta.getTimetable({ days: Number(legacyRaw) || 7 });
+    }
+    const past = pastRaw !== '' ? Number(pastRaw) : 14;
+    const future = futureRaw !== '' ? Number(futureRaw) : 14;
+    return this.animeMeta.getTimetable({
+      pastDays: Number.isFinite(past) ? past : 14,
+      futureDays: Number.isFinite(future) ? future : 14,
+    });
   }
 }

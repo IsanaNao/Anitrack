@@ -39,6 +39,19 @@ export class AnimeMeta {
   // Store as string[] for easy Tag rendering in frontend.
   @Prop({ type: [String], required: false, default: undefined })
   genres?: string[];
+
+  /** Bangumi 映射后的中文主标题（清单/仪表盘读路径优先使用）。 */
+  @Prop({ type: String, required: false, trim: true })
+  titleCn?: string;
+
+  @Prop({ type: String, required: false, trim: true })
+  titleJp?: string;
+
+  @Prop({ type: String, required: false, trim: true })
+  titleEn?: string;
+
+  @Prop({ type: String, required: false })
+  synopsisCn?: string;
 }
 
 export const AnimeMetaSchema = SchemaFactory.createForClass(AnimeMeta);

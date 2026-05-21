@@ -41,7 +41,7 @@
 
 - **后端**：`GET /api/anime-meta/timetable?days=7|14` — 当季 `tier=seasonal` 镜像；**分桶星期**优先 `bangumi.weekday`，缺失时回退 **`broadcast.day` / `broadcast.string`**（与 Bangumi 同为 1=周一…7=周日）；东京墙钟经 **`dayjs`（`Asia/Tokyo`）→ `Europe/Berlin`** 落到各**柏林日历日**列（详见 **§3.8.6**）。未映射 Bangumi 时响应中 **`bgmId` 可为 `0`**，详情区不展示 Bangumi 链。
 - **前端**：`/timetable` — 横向日期列、条目卡片、倒计时；列内 **全量渲染** API 返回的 `items`（无「每列最多 N 条」UI 截断）；布局采用 **`items-start`** 各列按内容高度对齐。点击条目打开详情并可 **加入清单（PLANNED / WATCHING）** 或跳转已有条目的 `AnimeEntryDialog`；**不**再做「番剧索引」占位 Tab。
-- **展示语言（时间表域）**：接口层对标题采用 **英文优先**（Bangumi `name_en` / Jikan `title_english` → 日文 → 中文兜底）；简介字段为 **`synopsisEn` / `synopsisJa`**（来自 Jikan `synopsis` 的轻量脚本分类），便于后续整站 i18n（见 **§10.5**）。
+- **展示语言（时间表域）**：API 返回多语言快照（`title` / `titleCn` / `titleJp` / `titleEn`，`synopsisCn` / `synopsisEn` / `synopsisJa`）；**前端按 UI 语言选取主标题与简介**（见 **§7.5**），不再在时间表页写死英文优先。
 
 > **暂缓（已知缺口）**：**部分番剧不出现在某一列**：Bangumi 标题未匹配则无 enrich；且若 Jikan **`broadcast.day` 为 Unknown** 且无 `bangumi.weekday`，则无法分桶。**播出钟点 TBD**（`airTimeLocal` 为空）：上游无可靠 `airTime`/时刻字段时仍会出现。已做 **`parseBangumiWallClockWithExtendedHours`**、`airDate` 含 `T` 时刻、`broadcast.time` 合并、**`POST /api/bee/sync-step?refreshSeasonalAirTimes=true`**、响应 **`airTime`** 与 F12 日志。**完整排钟与 100% 映射**依赖数据源或运营策略，属**锦上添花**，不阻塞课程核心交付（见 **§10.5**）。
 
@@ -455,9 +455,18 @@ anitrack-backend/src/modules/bee/
 - **Enrich**：`enrichBangumiSubject(malId, bgmId)` 拉取 Bangumi v0 subject，合并 `summaryCn`、`air_weekday`、`time`/`air_time` 等；`airTime` 写入前经 **`normalizeBangumiWallClock`**（兼容 `2330` → `23:30`）。
 - **与 §3.8.6 的关系**：时间表 API **消费**镜像中的 `bangumi.*` + Jikan **`data`**；**星期**可由 Bangumi 或 Jikan 广播字段推导；**钟点**仍依赖 `bangumi.airTime` / `airDate` / `broadcast` 等上游字段，缺失则 `airTimeLocal` 为空（前端 **TBD**）。Bangumi **仅未匹配**时条目仍可能入表（凭 Jikan 星期），但 **`bgmId=0`**，无中文摘要链。
 
-#### 3.9.12 `POST /api/bee/sync-step`（手动步进 + 可选当季播出纠正）
+#### 3.9.12 Bee 运维 POST（已写入 `swagger.json`，2026-05-21）
 
-> **注意**：该路径为 **POST**；若写入 `swagger.json` 的 `paths` 且未调整契约冒烟（默认对每条 path 发 **GET**），会导致冒烟失败。当前契约文件可能**仅**在本文档描述参数；完整 OpenAPI 条目需与 `contract-validator` 一并演进。
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| **POST** | `/api/bee/seed-step` | 轻量播种重试一步 → 返回 `BeeProgressSnapshot` |
+| **POST** | `/api/bee/sync-step` | 手动同步 batch（`batchSize` 1–10；可选 `refreshSeasonalAirTimes` / `airTimeRefreshLimit`）→ `BeeSyncStepResponse` |
+| **POST** | `/api/bee/bangumi-map` | 手动触发 Bangumi 标题映射 → `BeeBangumiMappingSnapshot` |
+| **POST** | `/api/bee/map-mal-ids` | 清单老番按需映射（query `malIds=38000,8861`）→ `{ attempted, mapped }`；内部用 Bangumi v0 **POST** `search/subjects` |
+
+> **契约冒烟**：`anitrack-tester/contract-validator` 已按 OpenAPI **声明的 HTTP 方法**探测（不再对 POST-only 路径误发 GET）。Bee POST 可能返回 **429**（Jikan/Bangumi 限流），冒烟记为**警告**而非失败。
+
+> **清单中文标题（非 HTTP 新路由）**：`GET /api/anime` 列表读路径在返回前**后台**触发最多 8 个缺 `titleCn` 的 `malId` 映射（不阻塞响应）；终端日志前缀 **`[i18n-map]`**。
 
 - **Query**
   - `batchSize`（可选）：本次 Jikan 镜像同步批大小，默认 `3`，上限 `10`
@@ -755,6 +764,35 @@ anitrack-backend/src/modules/bee/
 - 移动端：按“星期”折叠分组，卡片流
 - 桌面端：表格或多列栅格，支持快速扫视
 
+### 7.5 整站国际化（UI 文案 + 作品展示语言，2026-05-21）
+
+> **原则**：**壳层 UI 语言**（按钮、导航、Toast、空态）与 **番剧元数据展示语言**（标题、简介）**解耦**。切换语言只改前端渲染与字段优先级，**不改** `AnimeEntry.status` 等 API 枚举值。
+
+#### 7.5.1 前端（Next.js）
+
+| 模块 | 路径 / 职责 |
+|------|-------------|
+| 文案词典 | `anitrack/src/i18n/messages/zh.ts`、`en.ts` |
+| 运行时 | `I18nProvider` + `useI18n().t(key, params)`；根级挂在 `app/providers.tsx` |
+| 切换器 | `TopNav` → `LanguageSwitcher`；偏好 **`localStorage`** 键 `anitrack.locale`（`zh` \| `en`），并设置 `document.documentElement.lang` |
+| 作品标题/简介 | `anime-display.ts`：`pickAnimeTitle` / `pickAnimeSynopsis`；组件侧用 `useAnimeDisplay()` |
+
+**`pickAnimeTitle` 优先级（简述）**
+
+- UI = **zh**：`titleCn` → `title` → `titleJp` → `titleEn`
+- UI = **en**：`titleEn` → `title` → `titleJp` → `titleCn`
+
+简介同理：`synopsisCn`（Bangumi）与 `synopsisEn` / `synopsisJa`（Jikan 分类）按 UI 语言择优。
+
+> 未引入 `next-intl` 路由级 locale，避免改动 App Router 结构；若未来需要 `/en/library`，可在此基础上演进。
+
+#### 7.5.2 后端（NestJS，读路径增强）
+
+- **数据源**：Jikan（`AnimeMeta` / 镜像 `data`）+ Bangumi 映射（`AnimeMirror.titles`、`bangumi.summaryCn`）。
+- **`AnimeMetaService.attachMirrorI18n`**：在 **`findByMalIds`**、**`getOrFetchByMalId`**、**`randomSeasonalFromMirror`**、**`getTimetable`** 响应中合并 `titleCn` / `titleJp` / `titleEn` / `synopsisCn`（优先 DB 已持久化字段，再合并 `AnimeMirror.titles` / `bangumi.summaryCn`）。
+- **清单老番映射**：`BeeService.ensureBangumiMappingForMalId` → Bangumi v0 **POST** `/search/subjects`（非 GET）；成功则写入 **`AnimeMeta.titleCn`** 等。运维：`POST /api/bee/map-mal-ids`；日常依赖列表读路径后台批次 + 刷新页面。
+- **搜索 `GET /api/anime-meta/search`**：仍以 Jikan 即时结果为主，**不一定**带 Bangumi 中文名（除非该 `malId` 已有镜像映射）。
+
 ---
 
 ## 8. 实施路线图（进入代码阶段：3 个阶段）
@@ -793,6 +831,7 @@ anitrack-backend/src/modules/bee/
 - [x] Heatmap：Profile 页从“过去一年日历格”升级为“人生纸格（月）”（每行 12 个月）；后端 heatmap 输出升级为 `{ start,end,months[] }`（added/completed/episodes + intensity）
 - [x] Dashboard 当季推荐：`GET /api/anime-meta/seasonal-random`（`AnimeMirror` / `$sample`，见 **§3.8.5**）+ 前端换一批 / 加入清单（Sonner）+ **`SeasonalPickDetailDialog`**（卡片点击详情）
 - [x] 新番时间表：`/timetable` + `GET /api/anime-meta/timetable`（Bangumi 星期 + 镜像数据）；**播出钟点 TBD 问题暂缓**（见 **§1.2**）
+- [x] **整站双语**：UI 文案中/英切换 + 作品标题/简介按 UI 语言展示（见 **§7.5**、`TASK_PROGRESS.md` §4.9）
 - [ ] 独立 Seasonal Schedule 页面（若仍希望纯 Jikan schedule 视图，可作为阶段 6 可选，与现行 Bangumi 驱动时间表并存或取舍）
 
 ---
@@ -801,13 +840,17 @@ anitrack-backend/src/modules/bee/
 
 - **Auth**：课程未要求时可维持单用户 + `TEMP_USER_ID`；多用户见 **§3.10**。属**锦上添花**，非当前阻塞。
 - **Jikan**：**后端代理 + §3.8 Cache-Aside（`AnimeMeta`）** 与 **Bee 镜像** 已落地；直连仅作 miss 路径。
-- OpenAPI：仓库内 **`anitrack-backend/swagger.json`** 由 Nest 启动时加载；浏览器 **`http://localhost:3001/api-docs`**；契约冒烟对 `paths` 中每条路径发 **GET**（**POST-only** 端点见 **§3.9.12**）。长期可选 **zod-to-openapi** 等单向生成。
-- **整站 UI 语言（中/英）**：与作品元数据语言解耦；**实施任务见 `TASK_PROGRESS.md` §4.9**；作品标题仍以数据源与英文优先策略为主。
+- OpenAPI：仓库内 **`anitrack-backend/swagger.json`** 由 Nest 启动时加载；浏览器 **`http://localhost:3001/api-docs`**；契约冒烟对 `paths` 中**每个已声明方法**发请求（含 Bee **POST**，见 **§3.9.12**）。长期可选 **zod-to-openapi** 等单向生成。
+- **期末会考 · Promise 与 Bootstrap（仓库现状）**：
+  - **Bootstrap（应用启动）**：有。`anitrack-backend/src/main.ts` 中 **`async function bootstrap()`** → `NestFactory.create` → 全局管道/过滤器 → 加载 `swagger.json` → `listen`。**不是**前端 CSS 框架 Bootstrap（本仓库未使用）。
+  - **Promise / async-await**：有，贯穿全栈。例：前端 `lib/api.ts` 的 `fetcher`；React Query 的 `queryFn`；后端 Bee `Promise.all` 并行 `countDocuments`；`new Promise` + `setTimeout` 做礼貌退避。详见 **`TASK_PROGRESS.md` §4.10**。
+  - **若要更显式展示（可选增量）**：Dashboard 用 `Promise.all` 合并 `getStatsSummary` + `getAnimeEntries`；或在前端增加「启动健康检查」`Promise.all([fetch('/api'), fetch('/api/bee/status')])`。
+- **整站 UI 语言（中/英）**：已落地，见 **§7.5**；壳层文案与作品展示语言解耦。
 - **Timetable**：数据缺口与双源未对齐时的表现见 **§1.2**、**§10.5**。
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-05-14：核心交付闭环声明 + 可选增量/取舍**；此前 2026-05-13 文档与 Swagger GET；原快照 2026-04-29）
+## 10. 实施进度快照（与仓库同步，**2026-05-21：Swagger Bee POST + 契约按方法冒烟**；**整站双语 i18n**；**2026-05-14：核心交付闭环**）
 
 以下结论基于 **真实请求 + 数据库读写**（`anitrack-tester/api-test-suite/run-all.js`）、**仓库内 Vitest**（`npm test` / `npm run test:integration`），以及 **Contract Testing**（`anitrack-tester/contract-validator/run-contract-test.js`，**严格模式**：`CONTRACT_PENDING_PATHS` 为空）。
 
@@ -829,7 +872,7 @@ anitrack-backend/src/modules/bee/
 
 - **Jikan / 搜索**：`GET /api/anime-meta/search` 已分页；`AnimeMeta` 已含 `synopsis/genres/totalEpisodes`。
 - **Timetable**：真实数据 + Jikan 星期兜底已上线；**TBD / 缺列**仍受上游与映射率约束（§1.2）。
-- **前端**：Dashboard / Library / Profile / Timetable 已对接；**整站 i18n、Auth、推荐算法、纯 Jikan Schedule 第二视图** 等见 **§10.5**。
+- **前端**：Dashboard / Library / Profile / Timetable 已对接；**整站 i18n（§7.5）已上线**；Auth、推荐算法、纯 Jikan Schedule 第二视图等见 **§10.5**。
 
 ### 10.3 实现侧备忘（避免重复踩坑）
 
@@ -850,8 +893,8 @@ anitrack-backend/src/modules/bee/
 
 | 类型 | 内容 |
 |------|------|
-| **尚未开发（可选）** | 整站 **UI 文案双语切换**（`TASK_PROGRESS` §4.9）；**登录与多用户隔离**（§3.10）；**推荐个性化**（基于 `AnimeEntry` 的加权/每日推荐）；**Timetable 播出钟点「专项」**（更强上游 enrich、或第三方放送表）；**OpenAPI 覆盖全部 Bee POST**（需改契约冒烟或拆 path）；**Design system / 动效 / 无障碍** 等广义 UI/UX |
-| **建议开发（锦上添花、性价比高）** | 小范围 **UI 一致性**（间距、空态、错误提示 copy）；**页脚与排障文案**（Bangumi 未映射 / TBD 的用户解释）；**契约冒烟支持按 HTTP method 过滤** 后再把 POST 写入 swagger；**根 layout metadata**（`app/layout.tsx` 的 title/description 仍偏模板） |
-| **建议放弃或长期搁置（ROI 低或与现行路线重复）** | **并行维护「纯 Jikan `/schedule` 周视图 + 新页面」**（与现行 Bangumi+柏林日历列模型重复、429 与缓存成本高，除非产品强需求）；**追求 100% 播出钟点无 TBD**（无稳定免费源时成本上不封顶）；**过早 zod-to-openapi 全量生成**（维护成本高于当前手写 `swagger.json` 增量） |
-| **保持现状即可** | 单用户 + `TEMP_USER_ID`；番剧标题 **英文优先**；时间表 **Europe/Berlin**；Bee **65s/3 条** 礼貌抓取 |
+| **尚未开发（可选）** | **登录与多用户隔离**（§3.10）；**推荐个性化**（基于 `AnimeEntry` 的加权/每日推荐） |
+| **建议开发（锦上添花、性价比高）** | 小范围 **UI 一致性**（间距、空态）；**页脚与排障文案**（Bangumi 未映射 / TBD）；**URL 级 locale**；**架构图 / 功能示意图**（见 `TASK_PROGRESS.md` §12） |
+| **建议放弃或长期搁置（ROI 低或与现行路线重复）** | **Timetable「零 TBD / 全映射」数据专项**（与 §1.2 已知缺口同类：无稳定免费源时难 100% 无待定钟点）；**并行维护「纯 Jikan `/schedule` 周视图 + 新页面」**；**追求 100% 播出钟点无 TBD**；**过早 zod-to-openapi 全量生成** |
+| **保持现状即可** | 单用户 + `TEMP_USER_ID`；时间表 **Europe/Berlin**、**±2 周日期条**（`pastDays`/`futureDays`）；Bee **65s/3 条**；作品标题按 UI 语言择优（§7.5）；**响应式布局已完成**（`TASK_PROGRESS.md` §4.11） |
 

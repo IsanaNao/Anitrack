@@ -1,12 +1,15 @@
-import type { AnimeStatus } from "@/lib/api";
+"use client";
 
-const options: { key: AnimeStatus | "ALL"; label: string }[] = [
-  { key: "ALL", label: "全部" },
-  { key: "PLANNED", label: "想看" },
-  { key: "WATCHING", label: "在看" },
-  { key: "COMPLETED", label: "已看" },
-  { key: "DROPPED", label: "弃番" },
-  { key: "ON_HOLD", label: "搁置" },
+import type { AnimeStatus } from "@/lib/api";
+import { useI18n } from "@/i18n/I18nProvider";
+
+const keys: { key: AnimeStatus | "ALL"; labelKey: string }[] = [
+  { key: "ALL", labelKey: "status.ALL" },
+  { key: "PLANNED", labelKey: "status.PLANNED" },
+  { key: "WATCHING", labelKey: "status.WATCHING" },
+  { key: "COMPLETED", labelKey: "status.COMPLETED" },
+  { key: "DROPPED", labelKey: "status.DROPPED" },
+  { key: "ON_HOLD", labelKey: "status.ON_HOLD" },
 ];
 
 export function StatusFilter({
@@ -16,9 +19,11 @@ export function StatusFilter({
   value: AnimeStatus | "ALL";
   onChange: (v: AnimeStatus | "ALL") => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="flex flex-wrap gap-2">
-      {options.map((o) => {
+      {keys.map((o) => {
         const active = o.key === value;
         return (
           <button
@@ -32,11 +37,10 @@ export function StatusFilter({
                 : "border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900")
             }
           >
-            {o.label}
+            {t(o.labelKey)}
           </button>
         );
       })}
     </div>
   );
 }
-

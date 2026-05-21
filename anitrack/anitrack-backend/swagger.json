@@ -298,14 +298,140 @@
       "get": {
         "tags": ["Bee"],
         "summary": "Bangumi ↔ MAL mapping snapshot (counts)",
+        "description": "Read-only Mongo counts; does not call Bangumi HTTP.",
         "responses": {
           "200": {
-            "description": "Mongo-backed mapping counts for debugging.",
+            "description": "Mapping coverage snapshot.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BeeBangumiMappingSnapshot" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bee/seed-step": {
+      "post": {
+        "tags": ["Bee"],
+        "summary": "Trigger one lightweight seed retry step",
+        "description": "Runs `seedRetryStep` then returns the same JSON shape as `GET /api/bee/status`. Useful after Jikan rate-limit backoff.",
+        "responses": {
+          "200": {
+            "description": "Updated progress snapshot.",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/BeeProgressSnapshot" }
               }
             }
+          },
+          "502": {
+            "description": "Upstream or internal failure.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      }
+    },
+    "/api/bee/sync-step": {
+      "post": {
+        "tags": ["Bee"],
+        "summary": "Trigger one mirror sync batch (manual step)",
+        "description": "Syncs up to `batchSize` mirror documents (default 3, max 10). Optional `refreshSeasonalAirTimes` re-fetches Bangumi subject air fields for seasonal rows before sync.",
+        "parameters": [
+          {
+            "name": "batchSize",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3 },
+            "description": "Number of mirror rows to sync this tick."
+          },
+          {
+            "name": "refreshSeasonalAirTimes",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false },
+            "description": "When `true` or `1`, refresh Bangumi air times for up to `airTimeRefreshLimit` seasonal mirrors first."
+          },
+          {
+            "name": "airTimeRefreshLimit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
+            "description": "Cap for seasonal Bangumi enrich when `refreshSeasonalAirTimes` is enabled."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress snapshot; may include `seasonalAirTimeRefresh` when refresh query was set.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BeeSyncStepResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Jikan rate limit during sync.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          },
+          "502": {
+            "description": "Upstream or internal failure.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      }
+    },
+    "/api/bee/bangumi-map": {
+      "post": {
+        "tags": ["Bee"],
+        "summary": "Run Bangumi title-mapping pass once",
+        "description": "Invokes the same logic as the periodic Bangumi mapper (`tryBangumiMapSeasonal`). May call Bangumi APIs; returns mapping snapshot.",
+        "responses": {
+          "200": {
+            "description": "Updated Bangumi mapping snapshot.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BeeBangumiMappingSnapshot" }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream or internal failure.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          }
+        }
+      }
+    },
+    "/api/bee/map-mal-ids": {
+      "post": {
+        "tags": ["Bee"],
+        "summary": "On-demand Bangumi search mapping for library malIds",
+        "description": "For non-seasonal titles: Bangumi v0 **POST** `/search/subjects` + subject enrich, writes `AnimeMirror.titles` and (via read paths) `AnimeMeta.titleCn`. Comma-separated `malIds`; capped batch with rate-limit spacing. Normal list/dashboard mapping runs in the background on `GET /api/anime` without calling this endpoint.",
+        "parameters": [
+          {
+            "name": "malIds",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Comma-separated MAL ids, e.g. `38000,8861,1`. Empty → `{ attempted: 0, mapped: 0 }`.",
+            "example": "38000,8861"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Batch mapping result.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BeeMapMalIdsResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Bangumi rate limit (local backoff).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
+          },
+          "502": {
+            "description": "Upstream or internal failure.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiErrorBody" } } }
           }
         }
       }
@@ -426,7 +552,74 @@
       },
       "BeeProgressSnapshot": {
         "type": "object",
-        "description": "Loose JSON snapshot for Bee progress or mapping counts (fields evolve with implementation).",
+        "description": "Bee mirror tier counters and optional Jikan backoff timestamp.",
+        "required": ["tiers", "backoffUntil"],
+        "properties": {
+          "tiers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["total", "done"],
+              "properties": {
+                "total": { "type": "integer", "minimum": 0 },
+                "done": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "description": "Keys: seasonal, top_1y, top_5y, top_all, backfill."
+          },
+          "backoffUntil": {
+            "type": "integer",
+            "description": "Unix ms; 0 when not in backoff."
+          }
+        },
+        "additionalProperties": true
+      },
+      "BeeSeasonalAirTimeRefresh": {
+        "type": "object",
+        "required": ["attempted", "refreshed", "errors"],
+        "properties": {
+          "attempted": { "type": "integer", "minimum": 0 },
+          "refreshed": { "type": "integer", "minimum": 0 },
+          "errors": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "BeeSyncStepResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BeeProgressSnapshot" },
+          {
+            "type": "object",
+            "properties": {
+              "seasonalAirTimeRefresh": { "$ref": "#/components/schemas/BeeSeasonalAirTimeRefresh" }
+            }
+          }
+        ]
+      },
+      "BeeMapMalIdsResponse": {
+        "type": "object",
+        "required": ["attempted", "mapped"],
+        "properties": {
+          "attempted": { "type": "integer", "minimum": 0, "description": "MAL ids processed this call (after skip-if-already-cn)." },
+          "mapped": { "type": "integer", "minimum": 0, "description": "Count that received a Chinese title on mirror." }
+        },
+        "additionalProperties": true
+      },
+      "BeeBangumiMappingSnapshot": {
+        "type": "object",
+        "required": ["bangumiEnabled", "seasonal", "apiMappings", "hints"],
+        "properties": {
+          "bangumiEnabled": { "type": "boolean" },
+          "seasonal": {
+            "type": "object",
+            "properties": {
+              "totalQueued": { "type": "integer", "minimum": 0 },
+              "withJikanData": { "type": "integer", "minimum": 0 },
+              "withBgmId": { "type": "integer", "minimum": 0 },
+              "withSummaryCn": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "apiMappings": { "type": "integer", "minimum": 0 },
+          "hints": { "type": "array", "items": { "type": "string" } }
+        },
         "additionalProperties": true
       },
       "SeasonalRandomResponse": {
@@ -505,7 +698,11 @@
           "totalEpisodes": { "type": "integer", "minimum": 0 },
           "score": { "type": "number", "minimum": 0, "maximum": 10 },
           "synopsis": { "type": "string" },
-          "genres": { "type": "array", "items": { "type": "string" } }
+          "genres": { "type": "array", "items": { "type": "string" } },
+          "titleCn": { "type": "string", "description": "Bangumi Chinese title (persisted after on-demand map)." },
+          "titleJp": { "type": "string" },
+          "titleEn": { "type": "string" },
+          "synopsisCn": { "type": "string", "description": "Bangumi summary (zh), stripped HTML." }
         }
       },
       "AnimeEntryCreate": {

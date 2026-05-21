@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
 import type { AnimeEntry, AnimeMeta } from "@/lib/api";
 import {
   ApiClientError,
@@ -15,9 +17,12 @@ import { AppShell } from "@/components/AppShell";
 import { AnimeCard } from "@/components/AnimeCard";
 import { AnimeEntryDialog } from "@/components/AnimeEntryDialog";
 import { SeasonalPickDetailDialog } from "@/components/SeasonalPickDetailDialog";
-import { toast } from "sonner";
+import { useI18n } from "@/i18n/I18nProvider";
+import { useAnimeDisplay } from "@/i18n/useAnimeDisplay";
 
 export default function DashboardPage() {
+  const { t } = useI18n();
+  const { title: displayTitle } = useAnimeDisplay();
   const watchingNowRef = useRef<HTMLDivElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<AnimeEntry | null>(null);
@@ -54,11 +59,11 @@ export default function DashboardPage() {
       void queryClient.invalidateQueries({ queryKey: ["anime"] });
       setSeasonalDetailOpen(false);
       setSeasonalDetailMeta(null);
-      const title =
-        entry.animeMeta && typeof entry.animeMeta.title === "string"
-          ? entry.animeMeta.title
-          : `malId: ${entry.malId}`;
-      toast.success("已加入清单", { description: title });
+      const meta = entry.animeMeta;
+      const label = meta
+        ? displayTitle(meta, entry.malId)
+        : `malId: ${entry.malId}`;
+      toast.success(t("toast.addedToList"), { description: label });
     },
     onError: (e: unknown, vars) => {
       if (
@@ -66,11 +71,11 @@ export default function DashboardPage() {
         e.status === 409 &&
         e.details?.some((d) => d.path === "malId")
       ) {
-        toast.info("已在清单中", { description: vars.title });
+        toast.info(t("toast.alreadyInList"), { description: vars.title });
         return;
       }
-      const msg = e instanceof Error ? e.message : "添加失败";
-      toast.error("添加失败", { description: msg });
+      const msg = e instanceof Error ? e.message : t("common.unknownError");
+      toast.error(t("toast.addFailed"), { description: msg });
     },
   });
 
@@ -83,8 +88,6 @@ export default function DashboardPage() {
       const canScroll = el.scrollWidth > el.clientWidth;
       if (!canScroll) return;
 
-      // When the cursor is over this container, convert vertical wheel to horizontal scrolling
-      // and prevent the outer page from scrolling.
       if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
         e.preventDefault();
         el.scrollLeft += e.deltaY;
@@ -92,8 +95,11 @@ export default function DashboardPage() {
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel as any);
+    return () => el.removeEventListener("wheel", onWheel as EventListener);
   }, []);
+
+  const loadErr = (err: unknown) =>
+    `${t("common.loadFailed")}: ${err instanceof Error ? err.message : t("common.unknownError")}`;
 
   return (
     <AppShell>
@@ -110,51 +116,59 @@ export default function DashboardPage() {
           if (!seasonalDetailMeta) return;
           addFromRecommend.mutate({
             malId: seasonalDetailMeta.malId,
-            title: seasonalDetailMeta.title,
+            title: displayTitle(seasonalDetailMeta, seasonalDetailMeta.malId),
           });
         }}
       />
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-sm font-semibold">Profile & Stats</div>
+            <div className="text-sm font-semibold">{t("dashboard.profileStats")}</div>
             <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              快速概览（评分样本：{summary.data?.ratedCount ?? 0}）
+              {t("dashboard.quickOverview", { count: summary.data?.ratedCount ?? 0 })}
             </div>
           </div>
           <Link
             href="/profile"
-            className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            className="h-9 w-fit shrink-0 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
           >
-            进入 Profile
+            {t("common.enterProfile")}
           </Link>
         </div>
 
         {summary.isLoading ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">加载中…</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.loading")}</div>
         ) : summary.isError ? (
-          <div className="mt-3 text-sm text-red-600 dark:text-red-300">
-            加载失败：{summary.error instanceof Error ? summary.error.message : "unknown error"}
-          </div>
+          <div className="mt-3 text-sm text-red-600 dark:text-red-300">{loadErr(summary.error)}</div>
         ) : !summary.data ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">暂无数据</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.noData")}</div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">清单总数</div>
-              <div className="mt-1 text-2xl font-semibold">{summary.data.total}</div>
+          <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-4 sm:gap-3">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2.5 text-center dark:border-zinc-800 dark:bg-zinc-900/30 sm:px-4 sm:py-4 sm:text-left">
+              <div className="text-[10px] leading-tight text-zinc-500 dark:text-zinc-400 sm:text-xs">
+                {t("dashboard.totalEntries")}
+              </div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums sm:mt-1 sm:text-2xl">
+                {summary.data.total}
+              </div>
             </div>
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">已完成（COMPLETED）</div>
-              <div className="mt-1 text-2xl font-semibold">{summary.data.totalCompleted}</div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2.5 text-center dark:border-zinc-800 dark:bg-zinc-900/30 sm:px-4 sm:py-4 sm:text-left">
+              <div className="text-[10px] leading-tight text-zinc-500 dark:text-zinc-400 sm:text-xs">
+                {t("dashboard.completed")}
+              </div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums sm:mt-1 sm:text-2xl">
+                {summary.data.totalCompleted}
+              </div>
             </div>
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">平均评分（样本）</div>
-              <div className="mt-1 text-2xl font-semibold">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2.5 text-center dark:border-zinc-800 dark:bg-zinc-900/30 sm:px-4 sm:py-4 sm:text-left">
+              <div className="text-[10px] leading-tight text-zinc-500 dark:text-zinc-400 sm:text-xs">
+                {t("dashboard.avgRating")}
+              </div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums sm:mt-1 sm:text-2xl">
                 {summary.data.avgRating != null ? summary.data.avgRating : "—"}
               </div>
-              <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                正在观看：{summary.data.totalWatching}
+              <div className="mt-0.5 text-[10px] leading-tight text-zinc-500 dark:text-zinc-400 sm:mt-1 sm:text-xs">
+                {t("dashboard.watchingCount", { count: summary.data.totalWatching })}
               </div>
             </div>
           </div>
@@ -162,91 +176,93 @@ export default function DashboardPage() {
       </section>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">正在观看（精选）</div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-semibold">{t("dashboard.watchingFeatured")}</div>
           <Link
             href="/library"
             className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
           >
-            查看更多
+            {t("common.viewMore")}
           </Link>
         </div>
 
         {recent.isLoading ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">加载中…</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.loading")}</div>
         ) : recent.isError ? (
-          <div className="mt-3 text-sm text-red-600 dark:text-red-300">
-            加载失败：{recent.error instanceof Error ? recent.error.message : "unknown error"}
-          </div>
+          <div className="mt-3 text-sm text-red-600 dark:text-red-300">{loadErr(recent.error)}</div>
         ) : !recent.data ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">暂无数据</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.noData")}</div>
         ) : recent.data.items.length === 0 ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">暂无条目</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.noEntries")}</div>
         ) : (
           <div
             ref={watchingNowRef}
-            className="-mx-4 mt-4 flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:thin]"
+            className="-mx-4 mt-4 overflow-x-auto overscroll-x-contain px-4 pb-2 [scrollbar-width:thin]"
           >
-            {recent.data.items.map((e) => (
-              <div key={e.id} className="w-[220px] shrink-0">
-                <button
-                  className="block w-full text-left"
-                  type="button"
-                  onClick={() => {
-                    setSelectedEntry(e);
-                    setDialogOpen(true);
-                  }}
+            <div className="inline-grid w-max grid-flow-col grid-rows-2 gap-x-3 gap-y-3 [grid-auto-columns:min(10.5rem,calc((min(100vw-2.5rem,68rem)-0.75rem)/2))] md:flex md:w-auto md:flex-row md:gap-4">
+              {recent.data.items.map((e) => (
+                <div
+                  key={e.id}
+                  className="h-full min-w-0 md:w-[11.5rem] md:shrink-0 lg:w-[13.5rem]"
                 >
-                  <AnimeCard
-                    title={e.animeMeta?.title ?? `malId: ${e.malId}`}
-                    imageUrl={e.animeMeta?.imageUrl}
-                    status={e.status}
-                    malId={e.malId}
-                    genres={e.animeMeta?.genres}
-                    totalEpisodes={e.animeMeta?.totalEpisodes ?? e.animeMeta?.episodes}
-                    episodesWatched={e.episodesWatched}
-                  />
-                </button>
-              </div>
-            ))}
+                  <button
+                    className="block w-full text-left"
+                    type="button"
+                    onClick={() => {
+                      setSelectedEntry(e);
+                      setDialogOpen(true);
+                    }}
+                  >
+                    <AnimeCard
+                      density="compact"
+                      title={
+                        e.animeMeta
+                          ? displayTitle(e.animeMeta, e.malId)
+                          : `malId: ${e.malId}`
+                      }
+                      imageUrl={e.animeMeta?.imageUrl}
+                      status={e.status}
+                      malId={e.malId}
+                      genres={e.animeMeta?.genres}
+                      totalEpisodes={
+                        e.animeMeta?.totalEpisodes ?? e.animeMeta?.episodes
+                      }
+                      episodesWatched={e.episodesWatched}
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">新番随机推荐</div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-semibold">{t("dashboard.seasonalPicks")}</div>
           <button
             type="button"
             disabled={seasonalPicks.isFetching}
-            onClick={() => {
-              setSeasonalPickNonce((n) => n + 1);
-            }}
+            onClick={() => setSeasonalPickNonce((n) => n + 1)}
             className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            title="从 Bee 已镜像的当季库中重新抽样（不请求 Jikan）"
+            title={t("dashboard.shuffleTitle")}
           >
-            {seasonalPicks.isFetching ? "加载中…" : "换一批"}
+            {seasonalPicks.isFetching ? t("common.loading") : t("dashboard.shuffle")}
           </button>
         </div>
-        <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          数据来自 MongoDB <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">AnimeMirror</code>{" "}
-          中 <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">tier=seasonal</code>{" "}
-          的已同步条目；读路径不调用 Jikan。
-        </div>
+        <p
+          className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400"
+          translate="no"
+        >
+          {t("dashboard.seasonalSource")}
+        </p>
 
         {seasonalPicks.isLoading ? (
-          <div className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">加载中…</div>
+          <div className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">{t("common.loading")}</div>
         ) : seasonalPicks.isError ? (
-          <div className="mt-4 text-sm text-red-600 dark:text-red-300">
-            加载失败：{seasonalPicks.error instanceof Error ? seasonalPicks.error.message : "unknown error"}
-          </div>
+          <div className="mt-4 text-sm text-red-600 dark:text-red-300">{loadErr(seasonalPicks.error)}</div>
         ) : !seasonalPicks.data?.items.length ? (
-          <div className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
-            暂无当季镜像数据。请确认 Bee 已运行（例如环境变量{" "}
-            <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">SYNC_ENABLED=true</code>
-            ）且 <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">/seasons/now</code>{" "}
-            队列已同步到数据库。
-          </div>
+          <div className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">{t("dashboard.seasonalEmpty")}</div>
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {seasonalPicks.data.items.map((m) => (
@@ -260,7 +276,8 @@ export default function DashboardPage() {
                   }}
                 >
                   <AnimeCard
-                    title={m.title}
+                    density="compact"
+                    title={displayTitle(m, m.malId)}
                     imageUrl={m.imageUrl}
                     malId={m.malId}
                     genres={m.genres}
@@ -271,11 +288,14 @@ export default function DashboardPage() {
                   type="button"
                   disabled={addFromRecommend.isPending}
                   onClick={() => {
-                    addFromRecommend.mutate({ malId: m.malId, title: m.title });
+                    addFromRecommend.mutate({
+                      malId: m.malId,
+                      title: displayTitle(m, m.malId),
+                    });
                   }}
                   className="h-9 w-full rounded-md border border-zinc-200 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                 >
-                  加入清单（PLANNED）
+                  {t("dashboard.addPlanned")}
                 </button>
               </div>
             ))}
@@ -285,4 +305,3 @@ export default function DashboardPage() {
     </AppShell>
   );
 }
-

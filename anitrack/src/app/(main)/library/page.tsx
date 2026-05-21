@@ -21,8 +21,12 @@ import { Pagination } from "@/components/Pagination";
 import { SortSelect, type SortKey } from "@/components/SortSelect";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { AnimeEntryDialog } from "@/components/AnimeEntryDialog";
+import { useI18n } from "@/i18n/I18nProvider";
+import { useAnimeDisplay } from "@/i18n/useAnimeDisplay";
 
 export default function LibraryPage() {
+  const { t } = useI18n();
+  const { title: displayTitle } = useAnimeDisplay();
   const qc = useQueryClient();
 
   const [q, setQ] = useState("");
@@ -68,12 +72,10 @@ export default function LibraryPage() {
   }, [list.data?.items]);
 
   useEffect(() => {
-    // 当页码变化时，把错误提示清掉，避免 UX 混乱
     setError(null);
   }, [page]);
 
   useEffect(() => {
-    // 状态/排序变化时回到第一页
     setPage(1);
   }, [status, sort]);
 
@@ -96,9 +98,9 @@ export default function LibraryPage() {
       setSearchPagination(res.pagination ?? null);
     } catch (e) {
       if (e instanceof ApiClientError && e.status === 429) {
-        setError("Jikan 限流（429）。请稍等几十秒再试。");
+        setError(t("errors.jikanRateLimit"));
       } else {
-        setError(e instanceof Error ? e.message : "搜索失败");
+        setError(e instanceof Error ? e.message : t("errors.searchFailed"));
       }
     } finally {
       setSearching(false);
@@ -121,22 +123,14 @@ export default function LibraryPage() {
       "Love Live School Idol Project",
     ];
 
-    return {
-      show: true,
-      message:
-        "没找到想要的结果？大型系列番剧（如 Love Live!）建议搜索其副标题（如 “Superstar” 或 “Sunshine”）以获得更精准的结果。",
-      suggestions,
-    };
-  }, [qTrimmed, searchResults.length]);
+    return { show: true, message: t("library.searchTipsMessage"), suggestions };
+  }, [qTrimmed, searchResults.length, t]);
 
   useEffect(() => {
-    // Debounce auto search: query changes → reset page → auto search
     setSearchPage(1);
   }, [debouncedQuery]);
 
   useEffect(() => {
-    // Auto search when debouncedQuery changes or page changes.
-    // If user pressed Enter recently, skip debounce-triggered run.
     const enterAt = enterSearchRef.current;
     if (Date.now() - enterAt < 300) return;
     const appliedAt = suggestionAppliedRef.current;
@@ -150,15 +144,15 @@ export default function LibraryPage() {
     setAddingMalId(malId);
     try {
       await createAnimeEntry({ malId });
-      toast.success("已添加到清单");
+      toast.success(t("toast.addedToLibrary"));
       await qc.invalidateQueries({ queryKey: ["anime"] });
     } catch (e) {
       if (e instanceof ApiClientError && e.status === 409) {
-        setError("已在清单中（重复添加）。");
+        setError(t("errors.alreadyInList"));
       } else if (e instanceof ApiClientError && e.status === 429) {
-        setError("Jikan 限流（429）。请稍等几十秒再试。");
+        setError(t("errors.jikanRateLimit"));
       } else {
-        setError(e instanceof Error ? e.message : "添加失败");
+        setError(e instanceof Error ? e.message : t("toast.addFailed"));
       }
     } finally {
       setAddingMalId(null);
@@ -166,19 +160,17 @@ export default function LibraryPage() {
   }
 
   const totalPages = list.data?.totalPages ?? 1;
+  const loadErr = (err: unknown) =>
+    `${t("common.loadFailed")}: ${err instanceof Error ? err.message : t("common.unknownError")}`;
 
   return (
     <AppShell>
-      <AnimeEntryDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        entry={selectedEntry}
-      />
+      <AnimeEntryDialog open={dialogOpen} onOpenChange={setDialogOpen} entry={selectedEntry} />
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <input
             className="h-10 w-full rounded-md border border-zinc-200 bg-transparent px-3 text-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:focus:border-zinc-600"
-            placeholder="搜索番剧（Jikan）…"
+            placeholder={t("library.searchPlaceholder")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
@@ -198,7 +190,7 @@ export default function LibraryPage() {
             }}
             disabled={!canSearch}
           >
-            {searching ? "搜索中…" : "搜索"}
+            {searching ? t("common.searching") : t("common.search")}
           </button>
         </div>
 
@@ -209,20 +201,16 @@ export default function LibraryPage() {
         ) : null}
 
         <div className="mt-4">
-          <div className="text-sm font-semibold">搜索结果</div>
+          <div className="text-sm font-semibold">{t("library.searchResults")}</div>
           <div className="mt-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
             {searchResults.length === 0 ? (
-              <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                请输入关键词（支持 500ms 防抖自动搜索，Enter 立即搜索）
-              </div>
+              <div className="text-sm text-zinc-500 dark:text-zinc-400">{t("library.searchHint")}</div>
             ) : (
               <div className="grid gap-3">
                 {searchTips?.show ? (
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-                    <div className="font-semibold">搜索建议</div>
-                    <div className="mt-1 text-amber-800 dark:text-amber-200">
-                      {searchTips.message}
-                    </div>
+                    <div className="font-semibold">{t("library.searchTipsTitle")}</div>
+                    <div className="mt-1 text-amber-800 dark:text-amber-200">{searchTips.message}</div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {searchTips.suggestions.map((s) => (
                         <button
@@ -236,7 +224,7 @@ export default function LibraryPage() {
                             void onSearch({ page: 1, immediate: true });
                           }}
                           disabled={searching}
-                          title="点击直接填充关键词并搜索"
+                          title={t("library.suggestionTitle")}
                         >
                           {s}
                         </button>
@@ -255,16 +243,18 @@ export default function LibraryPage() {
                         {m.imageUrl ? (
                           <img
                             src={m.imageUrl}
-                            alt={m.title}
+                            alt={displayTitle(m, m.malId)}
                             className="h-full w-full object-cover"
                             loading="lazy"
                           />
                         ) : null}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold">{m.title}</div>
+                        <div className="truncate text-sm font-semibold">
+                          {displayTitle(m, m.malId)}
+                        </div>
                         <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                          malId: {m.malId}
+                          {t("common.malId")}: {m.malId}
                         </div>
                       </div>
                       {myMalIdSet.has(m.malId) ? (
@@ -272,7 +262,7 @@ export default function LibraryPage() {
                           className="h-9 shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500"
                           disabled
                         >
-                          已在清单
+                          {t("library.inList")}
                         </button>
                       ) : (
                         <button
@@ -280,7 +270,7 @@ export default function LibraryPage() {
                           onClick={() => void onAdd(m.malId)}
                           disabled={addingMalId === m.malId}
                         >
-                          {addingMalId === m.malId ? "添加中…" : "添加"}
+                          {addingMalId === m.malId ? t("common.adding") : t("common.add")}
                         </button>
                       )}
                     </div>
@@ -308,16 +298,16 @@ export default function LibraryPage() {
       </section>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold">我的清单</div>
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-semibold">{t("library.myList")}</div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <SortSelect value={sort} onChange={setSort} />
             <button
               className="h-9 rounded-md border border-zinc-200 px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900 disabled:opacity-50"
               onClick={() => void list.refetch()}
               disabled={list.isFetching}
             >
-              {list.isFetching ? "刷新中…" : "刷新"}
+              {list.isFetching ? t("common.refreshing") : t("common.refresh")}
             </button>
           </div>
         </div>
@@ -327,17 +317,14 @@ export default function LibraryPage() {
         </div>
 
         {list.isLoading ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">加载中…</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.loading")}</div>
         ) : list.isError ? (
-          <div className="mt-3 text-sm text-red-600 dark:text-red-300">
-            加载失败：
-            {list.error instanceof Error ? list.error.message : "unknown error"}
-          </div>
+          <div className="mt-3 text-sm text-red-600 dark:text-red-300">{loadErr(list.error)}</div>
         ) : !list.data ? (
-          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">暂无数据</div>
+          <div className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{t("common.noData")}</div>
         ) : list.data.items.length === 0 ? (
           <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/30 dark:text-zinc-400">
-            暂无条目
+            {t("common.noEntries")}
           </div>
         ) : (
           <>
@@ -353,7 +340,11 @@ export default function LibraryPage() {
                   }}
                 >
                   <AnimeCard
-                    title={e.animeMeta?.title ?? `malId: ${e.malId}`}
+                    title={
+                      e.animeMeta
+                        ? displayTitle(e.animeMeta, e.malId)
+                        : `malId: ${e.malId}`
+                    }
                     imageUrl={e.animeMeta?.imageUrl}
                     status={e.status}
                     malId={e.malId}
@@ -379,4 +370,3 @@ export default function LibraryPage() {
     </AppShell>
   );
 }
-

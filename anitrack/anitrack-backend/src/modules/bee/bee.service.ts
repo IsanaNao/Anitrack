@@ -3,12 +3,18 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BangumiService } from '../bangumi/bangumi.service';
-import { ApiErrorException } from '../../shared/http/api-error.filter';
+import {
+  ApiErrorException,
+  describeApiError,
+} from '../../shared/http/api-error.filter';
 import {
   flattenBangumiCalendar,
   jikanTitlesFromMirrorData,
   normalizeBangumiWallClock,
+  pickBangumiSearchMatch,
   pickBangumiTitleMatch,
+  titlesFromBangumiNames,
+  titlesFromBangumiSubject,
   stripHtmlSummary,
 } from './bee-mapping.util';
 import { AnimeMirror, AnimeMirrorDocument } from './schemas/anime-mirror.schema';
@@ -881,6 +887,217 @@ export class BeeService implements OnModuleInit {
         return;
       }
       this.log.warn(`[Bee] Bangumi map failed: ${e?.message ?? e}`);
+    }
+  }
+
+  /**
+   * 为清单/库内老番建立 MAL ↔ Bangumi 映射（搜索 + v0 subject），写入 mirror `titles`。
+   * 已有 `titles.cn` 时跳过。
+   */
+  async ensureBangumiMappingForMalId(malId: number): Promise<boolean> {
+    if (!this.bangumiEnabled()) {
+      this.log.warn(`[i18n-map] malId=${malId} 跳过：BANGUMI_ENABLED=false`);
+      return false;
+    }
+    if (!Number.isFinite(malId) || malId <= 0) return false;
+
+    const mirror = await this.mirrorModel.findOne({ malId }).lean();
+    if (mirror?.titles?.cn?.trim()) {
+      this.log.debug(
+        `[i18n-map] malId=${malId} 已有 titles.cn="${mirror.titles.cn.trim()}"`,
+      );
+      return true;
+    }
+
+    const existingMap = await this.apiMappingModel.findOne({ malId }).lean();
+    if (existingMap?.bgmId) {
+      const bgmId = Number(existingMap.bgmId);
+      this.log.log(
+        `[i18n-map] malId=${malId} 已有 ApiMapping → bgmId=${bgmId}，拉取 subject…`,
+      );
+      try {
+        const sub = await this.bangumi.getSubjectV0Cached(bgmId);
+        const titles = titlesFromBangumiSubject(sub);
+        await this.applyBangumiMapping(malId, bgmId, titles);
+        const ok = Boolean(titles.cn?.trim());
+        this.log.log(
+          `[i18n-map] malId=${malId} 映射${ok ? '成功' : '无中文名'}：${titles.cn || titles.jp}`,
+        );
+        return ok;
+      } catch (e: any) {
+        this.log.warn(
+          `[i18n-map] malId=${malId} subject 失败: ${describeApiError(e)}`,
+        );
+        return false;
+      }
+    }
+
+    let jt = mirror ? jikanTitlesFromMirrorData(mirror.data) : [];
+    if (!jt.length) {
+      this.log.log(`[i18n-map] malId=${malId} 无 Jikan 镜像，拉取 Jikan…`);
+      try {
+        await this.syncOne(malId);
+        const refreshed = await this.mirrorModel.findOne({ malId }).lean();
+        jt = refreshed ? jikanTitlesFromMirrorData(refreshed.data) : [];
+      } catch (e: any) {
+        this.log.warn(
+          `[i18n-map] malId=${malId} Jikan 同步失败: ${describeApiError(e)}`,
+        );
+        return false;
+      }
+    }
+    if (!jt.length) {
+      this.log.warn(`[i18n-map] malId=${malId} 仍无可用 Jikan 标题`);
+      return false;
+    }
+
+    const searchQ = jt.find((t) => /[a-zA-Z]/.test(t)) ?? jt[0];
+    this.log.log(
+      `[i18n-map] malId=${malId} Bangumi 搜索 keyword="${searchQ}"（候选: ${jt.slice(0, 3).join(' | ')}）`,
+    );
+    try {
+      const results = await this.bangumi.searchSubjectsCached(searchQ, 8);
+      this.log.debug(
+        `[i18n-map] malId=${malId} 搜索返回 ${results.length} 条`,
+      );
+      const pick = pickBangumiSearchMatch(jt, results);
+      if (!pick) {
+        this.log.warn(
+          `[i18n-map] malId=${malId} 未匹配到 Bangumi 条目（keyword="${searchQ}"）`,
+        );
+        return false;
+      }
+
+      const bgmId = Number(pick.id);
+      if (!Number.isFinite(bgmId) || bgmId <= 0) return false;
+
+      const taken = await this.apiMappingModel.findOne({ bgmId }).lean();
+      if (taken && Number(taken.malId) !== malId) {
+        this.log.warn(
+          `[i18n-map] malId=${malId} bgmId=${bgmId} 已被 malId=${taken.malId} 占用`,
+        );
+        return false;
+      }
+
+      const titles = titlesFromBangumiNames(pick);
+      await this.applyBangumiMapping(malId, bgmId, titles);
+      this.log.log(
+        `[i18n-map] malId=${malId} → bgmId=${bgmId} 中文="${titles.cn}" / jp="${titles.jp}"`,
+      );
+      return Boolean(titles.cn?.trim());
+    } catch (e: any) {
+      if (e instanceof ApiErrorException && e.getStatus() === 429) {
+        this.log.warn(
+          `[i18n-map] malId=${malId} Bangumi 限流: ${e.userMessage}`,
+        );
+      } else {
+        this.log.warn(`[i18n-map] malId=${malId} 失败: ${describeApiError(e)}`);
+      }
+      return false;
+    }
+  }
+
+  /** 批量按需映射（限流），供清单列表读路径调用。 */
+  async ensureBangumiMappingsForMalIds(
+    malIds: number[],
+    opts?: { max?: number; delayMs?: number },
+  ): Promise<{ attempted: number; mapped: number }> {
+    const max = Math.min(12, Math.max(1, opts?.max ?? 6));
+    const delayMs = Math.min(2000, Math.max(0, opts?.delayMs ?? 350));
+    const unique = Array.from(
+      new Set(malIds.filter((id) => Number.isFinite(id) && id > 0)),
+    );
+    let mapped = 0;
+    let attempted = 0;
+    let skipped = 0;
+    this.log.log(
+      `[i18n-map] Bee 批量：队列 ${unique.length} 个，本批最多处理 ${max} 个`,
+    );
+    for (const malId of unique) {
+      if (attempted >= max) break;
+      const row = await this.mirrorModel
+        .findOne({ malId })
+        .select('titles.cn')
+        .lean();
+      if (row?.titles?.cn?.trim()) {
+        skipped += 1;
+        continue;
+      }
+      attempted += 1;
+      this.log.log(`[i18n-map] Bee 批量 (${attempted}/${max}) malId=${malId} …`);
+      const ok = await this.ensureBangumiMappingForMalId(malId);
+      if (ok) mapped += 1;
+      this.log.log(
+        `[i18n-map] Bee 批量 (${attempted}/${max}) malId=${malId} → ${ok ? 'OK' : '失败/跳过'}`,
+      );
+      if (delayMs > 0 && attempted < max) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    this.log.log(
+      `[i18n-map] Bee 批量结束：attempted=${attempted} mapped=${mapped} skipped=${skipped}`,
+    );
+    return { attempted, mapped };
+  }
+
+  private async applyBangumiMapping(
+    malId: number,
+    bgmId: number,
+    titles: { cn: string; jp: string; en: string },
+  ): Promise<void> {
+    const taken = await this.apiMappingModel.findOne({ bgmId }).lean();
+    if (taken && Number(taken.malId) !== malId) {
+      throw new Error(`bgmId ${bgmId} already mapped to malId ${taken.malId}`);
+    }
+
+    try {
+      await this.apiMappingModel.updateOne(
+        { malId },
+        { $set: { malId, bgmId, lastMapped: new Date() } },
+        { upsert: true },
+      );
+    } catch (e: any) {
+      if (e?.code === 11000) throw e;
+      throw e;
+    }
+
+    await this.mirrorModel.updateOne(
+      { malId },
+      {
+        $set: {
+          bgmId,
+          titles: { cn: titles.cn, jp: titles.jp, en: titles.en },
+        },
+        $setOnInsert: {
+          malId,
+          source: 'general',
+          tier: 'backfill',
+          priority: 90,
+        },
+      },
+      { upsert: true },
+    );
+
+    try {
+      await this.enrichBangumiSubject(malId, bgmId);
+      const sub = await this.bangumi.getSubjectV0Cached(bgmId);
+      const refined = titlesFromBangumiSubject(sub);
+      if (refined.cn?.trim()) {
+        await this.mirrorModel.updateOne(
+          { malId },
+          {
+            $set: {
+              titles: {
+                cn: refined.cn,
+                jp: refined.jp || titles.jp,
+                en: refined.en || titles.en,
+              },
+            },
+          },
+        );
+      }
+    } catch (e: any) {
+      this.log.warn(`[Bee] enrich on-demand malId=${malId}: ${e?.message ?? e}`);
     }
   }
 

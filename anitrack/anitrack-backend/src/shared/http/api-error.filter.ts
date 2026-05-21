@@ -30,6 +30,25 @@ export class ApiErrorException extends HttpException {
   }
 }
 
+/** 日志/排障用：避免只打出 HttpException 默认的 "Http Exception"。 */
+export function describeApiError(e: unknown): string {
+  if (e instanceof ApiErrorException) {
+    return `${e.code} (${e.getStatus()}): ${e.userMessage}`;
+  }
+  if (e instanceof HttpException) {
+    const body = e.getResponse();
+    if (body && typeof body === 'object' && 'error' in body) {
+      const err = (body as { error?: { code?: string; message?: string } }).error;
+      if (err?.message) {
+        return `${err.code ?? 'HTTP'} (${e.getStatus()}): ${err.message}`;
+      }
+    }
+    return `HTTP ${e.getStatus()}: ${e.message}`;
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 function flattenValidationErrors(errors: ValidationError[]): ApiErrorDetail[] {
   const out: ApiErrorDetail[] = [];
 

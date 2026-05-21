@@ -52,6 +52,17 @@ export function formatDateSlashBerlin(d: Date): string {
   }).format(d);
 }
 
+/** 柏林日历日正午 instant，用于按日偏移生成时间表列（避免 DST 边界错位）。 */
+export function berlinInstantAtDayOffset(offsetDays: number, from = new Date()): Date {
+  const anchor = dayjs(from).tz(TZ_BERLIN).startOf('day').add(12, 'hour');
+  return anchor.add(offsetDays, 'day').toDate();
+}
+
+export function formatWeekdayShortZhBerlin(d: Date): string {
+  const long = formatWeekdayLongZhBerlin(d);
+  return long.startsWith('星期') ? `周${long.slice(2)}` : long;
+}
+
 /**
  * 将「东京本地墙钟 + 日历日」解析为绝对时间，再格式化为 `Europe/Berlin` 钟面时间。
  * 使用 dayjs `Asia/Tokyo` → `Europe/Berlin`（含 DST）；支持 **25:00 / 26:00** 等超 24 点记法。

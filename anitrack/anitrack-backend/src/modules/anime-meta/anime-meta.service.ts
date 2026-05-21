@@ -1,20 +1,24 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Cache } from 'cache-manager';
-import { ApiErrorException } from '../../shared/http/api-error.filter';
+import {
+  ApiErrorException,
+  describeApiError,
+} from '../../shared/http/api-error.filter';
 import { stripHtmlSummary } from '../bee/bee-mapping.util';
 import { BeeService } from '../bee/bee.service';
 import { AnimeMirror, AnimeMirrorDocument } from '../bee/schemas/anime-mirror.schema';
 import { AnimeMeta, AnimeMetaDocument } from './schemas/anime-meta.schema';
 import type { JikanPagination } from './dto/anime-meta-search.dto';
 import {
+  berlinInstantAtDayOffset,
   bangumiWeekdayFromBerlinInstant,
   formatDateSlashBerlin,
-  formatWeekdayLongZhBerlin,
+  formatWeekdayShortZhBerlin,
   formatYmdBerlin,
   tokyoWallToBerlinClock,
 } from './timetable.util';
@@ -51,6 +55,8 @@ type JikanSearchResponse = {
 
 @Injectable()
 export class AnimeMetaService {
+  private readonly log = new Logger(AnimeMetaService.name);
+
   constructor(
     @InjectModel(AnimeMeta.name)
     private readonly model: Model<AnimeMetaDocument>,
@@ -162,10 +168,169 @@ export class AnimeMetaService {
     return this.cachedJikanJson<JikanSearchResponse>(url);
   }
 
+  /** 从 `AnimeMirror` 快照提取多语言标题（供前端 i18n 展示，不写回 `AnimeMeta`）。 */
+  private extractTitlesFromMirrorRow(row: {
+    titles?: { cn?: string; jp?: string; en?: string };
+    data?: unknown;
+  }): { titleCn?: string; titleJp?: string; titleEn?: string } {
+    const inner = (row.data as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    const innerTitleEn =
+      inner && typeof inner.title_english === 'string'
+        ? String(inner.title_english).trim()
+        : '';
+    const innerTitleJp =
+      inner && typeof inner.title_japanese === 'string'
+        ? String(inner.title_japanese).trim()
+        : '';
+    const titleCn =
+      typeof row.titles?.cn === 'string' ? row.titles.cn.trim() : '';
+    const titleJp =
+      (typeof row.titles?.jp === 'string' ? row.titles.jp.trim() : '') ||
+      innerTitleJp ||
+      '';
+    const titleEn =
+      (typeof row.titles?.en === 'string' ? row.titles.en.trim() : '') ||
+      innerTitleEn ||
+      '';
+    return {
+      titleCn: titleCn || undefined,
+      titleJp: titleJp || undefined,
+      titleEn: titleEn || undefined,
+    };
+  }
+
+  private attachMirrorI18n(
+    meta: Record<string, unknown>,
+    row?: {
+      titles?: { cn?: string; jp?: string; en?: string };
+      bangumi?: { summaryCn?: string };
+      data?: unknown;
+    } | null,
+  ): Record<string, unknown> {
+    const fromMirror = row ? this.extractTitlesFromMirrorRow(row) : {};
+    const docCn =
+      typeof meta.titleCn === 'string' ? meta.titleCn.trim() : '';
+    const docJp =
+      typeof meta.titleJp === 'string' ? meta.titleJp.trim() : '';
+    const docEn =
+      typeof meta.titleEn === 'string' ? meta.titleEn.trim() : '';
+    const docSynopsisCn =
+      typeof meta.synopsisCn === 'string' ? meta.synopsisCn.trim() : '';
+
+    const summaryRaw = row?.bangumi?.summaryCn;
+    const mirrorSynopsisCn =
+      typeof summaryRaw === 'string' && summaryRaw.trim()
+        ? stripHtmlSummary(summaryRaw)
+        : undefined;
+
+    return {
+      ...meta,
+      titleCn: docCn || fromMirror.titleCn,
+      titleJp: docJp || fromMirror.titleJp,
+      titleEn: docEn || fromMirror.titleEn,
+      synopsisCn: docSynopsisCn || mirrorSynopsisCn,
+    };
+  }
+
+  private async malIdsNeedingI18n(malIds: number[]): Promise<number[]> {
+    if (!malIds.length) return [];
+    const withCnMeta = await this.model
+      .find({
+        malId: { $in: malIds },
+        titleCn: { $exists: true, $nin: [null, ''] },
+      })
+      .select('malId')
+      .lean();
+    const metaOk = new Set(withCnMeta.map((d) => d.malId));
+    const mirrors = await this.mirrorModel
+      .find({ malId: { $in: malIds } })
+      .select('malId titles.cn')
+      .lean();
+    const mirrorOk = new Set(
+      mirrors
+        .filter((m) => typeof m.titles?.cn === 'string' && m.titles.cn.trim())
+        .map((m) => m.malId),
+    );
+    return malIds.filter((id) => !metaOk.has(id) && !mirrorOk.has(id));
+  }
+
+  private async persistI18nFromMirror(malId: number): Promise<void> {
+    const mirror = await this.mirrorModel
+      .findOne({ malId })
+      .select('titles bangumi')
+      .lean();
+    if (!mirror) return;
+    const t = this.extractTitlesFromMirrorRow(mirror);
+    const summaryRaw = mirror.bangumi?.summaryCn;
+    const synopsisCn =
+      typeof summaryRaw === 'string' && summaryRaw.trim()
+        ? stripHtmlSummary(summaryRaw)
+        : undefined;
+    const $set: Record<string, string> = {};
+    if (t.titleCn) $set.titleCn = t.titleCn;
+    if (t.titleJp) $set.titleJp = t.titleJp;
+    if (t.titleEn) $set.titleEn = t.titleEn;
+    if (synopsisCn) $set.synopsisCn = synopsisCn;
+    if (!Object.keys($set).length) return;
+    await this.model.updateOne({ malId }, { $set });
+  }
+
+  /** 为清单条目按需建立 Bangumi 映射并写回 `AnimeMeta` 多语言字段。 */
+  async ensureI18nForMalIds(malIds: number[]) {
+    const need = await this.malIdsNeedingI18n(malIds);
+    if (!need.length) {
+      this.log.debug(`[i18n-map] 无需映射（均已具备 titleCn）`);
+      return { attempted: 0, mapped: 0, persisted: 0 };
+    }
+    const t0 = Date.now();
+    this.log.log(
+      `[i18n-map] 开始：本批 ${need.length} 个 malId → [${need.join(', ')}]`,
+    );
+    const { attempted, mapped } =
+      await this.bee.ensureBangumiMappingsForMalIds(need, { max: 8 });
+    let persisted = 0;
+    for (const id of need) {
+      await this.persistI18nFromMirror(id);
+      const doc = await this.model
+        .findOne({ malId: id })
+        .select('titleCn')
+        .lean();
+      if (doc?.titleCn?.trim()) persisted += 1;
+    }
+    const ms = Date.now() - t0;
+    this.log.log(
+      `[i18n-map] 完成（${ms}ms）：attempted=${attempted} mapped=${mapped} persisted=${persisted}/${need.length}`,
+    );
+    return { attempted, mapped, persisted };
+  }
+
   async findByMalIds(malIds: number[]) {
     if (!malIds.length) return [];
+    const need = await this.malIdsNeedingI18n(malIds);
+    if (need.length) {
+      const batch = need.slice(0, 8);
+      const remaining = Math.max(0, need.length - batch.length);
+      this.log.log(
+        `[i18n-map] 清单读路径：共 ${malIds.length} 部，缺中文 ${need.length} 部；后台映射 [${batch.join(', ')}]` +
+          (remaining > 0
+            ? `（另有 ${remaining} 部请刷新页面后继续补）`
+            : ''),
+      );
+      void this.ensureI18nForMalIds(batch).catch((e: unknown) => {
+        this.log.warn(`[i18n-map] 后台批次异常: ${describeApiError(e)}`);
+      });
+    }
     const docs = await this.model.find({ malId: { $in: malIds } });
-    return docs.map((d) => d.toJSON());
+    const mirrors = await this.mirrorModel
+      .find({ malId: { $in: malIds } })
+      .select('malId titles bangumi data')
+      .lean();
+    const mirrorByMal = new Map(mirrors.map((m) => [m.malId, m]));
+    return docs.map((d) => {
+      const json = d.toJSON() as Record<string, unknown>;
+      return this.attachMirrorI18n(json, mirrorByMal.get(d.malId) ?? null);
+    });
   }
 
   private normalizeGenres(
@@ -286,9 +451,36 @@ export class AnimeMetaService {
     };
   }
 
+  private async enrichMetaFromMirror(
+    malId: number,
+    meta: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const mirror = await this.mirrorModel
+      .findOne({ malId })
+      .select('malId titles bangumi data')
+      .lean();
+    return this.attachMirrorI18n(meta, mirror ?? null);
+  }
+
   async getOrFetchByMalId(malId: number) {
     const existing = await this.model.findOne({ malId });
-    if (existing) return existing.toJSON();
+    if (existing) {
+      let out = await this.enrichMetaFromMirror(
+        malId,
+        existing.toJSON() as Record<string, unknown>,
+      );
+      if (!(typeof out.titleCn === 'string' && out.titleCn.trim())) {
+        await this.ensureI18nForMalIds([malId]);
+        const refreshed = await this.model.findOne({ malId });
+        if (refreshed) {
+          out = await this.enrichMetaFromMirror(
+            malId,
+            refreshed.toJSON() as Record<string, unknown>,
+          );
+        }
+      }
+      return out;
+    }
 
     // Mirror-first: if Bee has synced this title recently, prefer local Mongo mirror.
     const mirrored = await this.bee.getFreshMirror(malId);
@@ -311,7 +503,10 @@ export class AnimeMetaService {
               : undefined,
           genres,
         });
-        return created.toJSON();
+        return this.enrichMetaFromMirror(
+          malId,
+          created.toJSON() as Record<string, unknown>,
+        );
       }
     }
 
@@ -345,7 +540,10 @@ export class AnimeMetaService {
     // Passive enqueue for mirror (general), so restart/resume will eventually cover it.
     void this.bee.enqueueGeneral(malId);
 
-    return created.toJSON();
+    return this.enrichMetaFromMirror(
+      malId,
+      created.toJSON() as Record<string, unknown>,
+    );
   }
 
   /**
@@ -368,15 +566,27 @@ export class AnimeMetaService {
         const genres = this.normalizeGenres(
           inner.genres as Array<{ name?: string | null }> | null | undefined,
         );
+        const i18nTitles = this.extractTitlesFromMirrorRow(row as {
+          titles?: { cn?: string; jp?: string; en?: string };
+          data?: unknown;
+        });
+        const summaryRaw = (row as { bangumi?: { summaryCn?: string } }).bangumi
+          ?.summaryCn;
+        const synopsisCn =
+          typeof summaryRaw === 'string' && summaryRaw.trim()
+            ? stripHtmlSummary(summaryRaw)
+            : undefined;
         return {
           malId,
           title,
+          ...i18nTitles,
           imageUrl: images?.jpg?.image_url ?? undefined,
           episodes: totalEpisodes ?? undefined,
           totalEpisodes: totalEpisodes ?? undefined,
           score: (inner.score as number | null | undefined) ?? undefined,
           synopsis:
             typeof inner.synopsis === 'string' ? inner.synopsis : undefined,
+          synopsisCn,
           genres,
         };
       })
@@ -406,11 +616,26 @@ export class AnimeMetaService {
   }
 
   /**
-   * 7/14 日横向时间表：基于 `AnimeMirror`（当季）与东京墙钟 → `Europe/Berlin` 展示。
-   * 分桶星期：**优先** `bangumi.weekday`（已映射 Bangumi），否则回退 Jikan `broadcast.day` / `broadcast.string`，避免「能搜到、无 bgmId 就不出现」的断层。
+   * 时间表：基于 `AnimeMirror`（当季）与东京墙钟 → `Europe/Berlin` 展示。
+   * 默认 **前后各 14 天**（共 29 个日历日）；兼容旧参数 `days`（仅向未来）。
    */
-  async getTimetable(daysInput: number) {
-    const days = Math.min(14, Math.max(1, Math.floor(daysInput) || 7));
+  async getTimetable(opts?: {
+    days?: number;
+    pastDays?: number;
+    futureDays?: number;
+  }) {
+    let startOffset = -14;
+    let endOffset = 14;
+    if (opts?.pastDays != null || opts?.futureDays != null) {
+      const past = Math.min(14, Math.max(0, Math.floor(opts.pastDays ?? 14) || 0));
+      const future = Math.min(14, Math.max(0, Math.floor(opts.futureDays ?? 14) || 0));
+      startOffset = -past;
+      endOffset = future;
+    } else if (opts?.days != null) {
+      const days = Math.min(14, Math.max(1, Math.floor(opts.days) || 7));
+      startOffset = 0;
+      endOffset = days - 1;
+    }
     const rawMirrors = await this.mirrorModel
       .find({
         tier: 'seasonal',
@@ -435,6 +660,7 @@ export class AnimeMetaService {
         malId: number;
         bgmId: number;
         title: string;
+        titleCn?: string;
         titleJp?: string;
         titleEn?: string;
         imageUrl?: string;
@@ -442,6 +668,7 @@ export class AnimeMetaService {
         nextAirAtIso?: string;
         /** 用于调试：参与换算的原始播出字符串（Bangumi / Jikan 兜底合并前） */
         airTime?: string;
+        synopsisCn?: string;
         synopsisEn?: string;
         synopsisJa?: string;
         episodeLabel: string;
@@ -450,11 +677,11 @@ export class AnimeMetaService {
 
     type TimetableItemOut = (typeof daysOut)[number]['items'][number];
 
-    for (let i = 0; i < days; i++) {
-      const d = new Date(Date.now() + i * 86400000);
+    for (let i = startOffset; i <= endOffset; i++) {
+      const d = berlinInstantAtDayOffset(i);
       const jbgm = bangumiWeekdayFromBerlinInstant(d);
       const date = formatYmdBerlin(d);
-      const weekdayLabel = formatWeekdayLongZhBerlin(d);
+      const weekdayLabel = formatWeekdayShortZhBerlin(d);
       const dateLabel = formatDateSlashBerlin(d);
 
       const items: TimetableItemOut[] = [];
@@ -493,12 +720,20 @@ export class AnimeMetaService {
           (typeof m.titles?.cn === 'string' && m.titles.cn.trim()) ||
           `mal:${m.malId}`;
 
+        const titleCn =
+          (typeof m.titles?.cn === 'string' && m.titles.cn.trim()) || undefined;
         const titleJp =
           (typeof m.titles?.jp === 'string' && m.titles.jp.trim()) || innerTitleJp || undefined;
         const titleEn =
           (typeof m.titles?.en === 'string' && m.titles.en.trim()) || innerTitleEn || undefined;
 
         const synopsisParts = this.timetableSynopsisFields(inner?.synopsis);
+        const summaryCnRaw = (m.bangumi as { summaryCn?: string } | undefined)
+          ?.summaryCn;
+        const synopsisCn =
+          typeof summaryCnRaw === 'string' && summaryCnRaw.trim()
+            ? stripHtmlSummary(summaryCnRaw)
+            : undefined;
 
         const airRaw = resolveTimetableAirTimeRaw({
           bangumi: (m.bangumi ?? null) as Record<string, unknown> | null,
@@ -510,12 +745,14 @@ export class AnimeMetaService {
           malId: m.malId,
           bgmId: Number.isFinite(bgmNum) && bgmNum > 0 ? bgmNum : 0,
           title,
+          titleCn,
           titleJp,
           titleEn,
           imageUrl,
           airTime: airRaw,
           airTimeLocal: conv?.clock ?? undefined,
           nextAirAtIso: conv?.iso,
+          synopsisCn,
           synopsisEn: synopsisParts.synopsisEn,
           synopsisJa: synopsisParts.synopsisJa,
           episodeLabel: 'Seasonal',

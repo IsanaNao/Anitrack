@@ -13,7 +13,8 @@
 - **答辩材料（`Project_Intro/`）**：
   - [x] 课程要求、排练清单、**演讲大纲**、**PPT 文字稿**（中文为主 + 德/英对照）
   - [x] 答辩图示 `anitrack-visuals/figures/*.png`（英文标签）
-  - [ ] 实际 `.pptx`（`slides/`）、Swagger/UI **英文截图**（`screenshots/`）、三人姓名分工、计时排练
+  - [x] 实际 `.pptx` — `Project_Intro/slides/Anitrack_Defense.pptx`（16 页；`build_defense_pptx.py` 可重建）
+  - [ ] Swagger/UI **英文截图**（`screenshots/`，插入 PPT 第 7/12 页）、第 2 页真实姓名、计时排练
 - **下一步**：按 **`Project_Intro/答辩清单.md`** 完成 PPT/截图并排练（≈7 分钟/人）；演示时 App 切 **English**
 - **阻塞/风险**：无课程级阻塞；**`TEMP_USER_ID`** 在接入 Auth 前仍为技术债（见 §9）；时间表部分 **TBD** 为数据限制，不阻塞课程
 - **最后更新时间**：2026-05-28（三份总纲文档 + `Project_Intro` 中文文件名同步）

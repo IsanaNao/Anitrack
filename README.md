@@ -99,7 +99,8 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 | 排练清单 | 已就绪 | `Project_Intro/答辩清单.md` |
 | 图示（英文） | 已导出 | `anitrack-visuals/figures/` |
 | Swagger | 仓库已有，答辩展示 UI | `http://localhost:3001/api-docs` |
-| 实际 PPT / 截图 | **待完成** | `Project_Intro/slides/`、`screenshots/` |
+| 实际 PPT | **已生成** | `Project_Intro/slides/Anitrack_Defense.pptx` |
+| 截图 | **待插入** | `Project_Intro/screenshots/` → PPT 第 7/12 页 |
 
 答辩时：**幻灯片与 Live-Demo 界面请用 English**（App 内语言切换器）。
 

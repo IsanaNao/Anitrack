@@ -36,7 +36,11 @@
 
 ```text
 Project_Intro/
-├── slides/           # .pptx（待建）
-└── screenshots/      # Swagger、四页 UI（英文界面，待截）
+├── slides/
+│   └── Anitrack_Defense.pptx   # 16 页答辩 PPT（英文投屏）
+├── build_defense_pptx.py       # 重新生成 PPT：python build_defense_pptx.py
+└── screenshots/                # Swagger、响应式截图（待截，插入第 7/12 页）
 ```
+
+**生成 PPT**：在 `Project_Intro/` 目录执行 `python build_defense_pptx.py`（需 `python-pptx`；图示来自 `anitrack-visuals/figures/*.png`）。
 

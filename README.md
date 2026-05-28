@@ -2,13 +2,20 @@
 
 基于 **Next.js（前端）+ NestJS（后端）+ MongoDB** 的番剧进度管理系统，支持自动化热力图统计与多维契约测试。
 
-> **里程碑（2026-05-21）**：在 **2026-05-14 核心闭环** 基础上，已交付 **整站中/英 UI**、**清单 Bangumi 按需中文映射**、**手机/桌面响应式布局**（含时间表日期条 ±2 周）。后续 **登录多用户、放送数据「零 TBD」** 等为**锦上添花**，详见 **`PROJECT_BLUEPRINT.md` §10.5** 与 **`TASK_PROGRESS.md` §4.9 / §4.11**。
+> **里程碑（2026-05-28）**：**课程内容要求已全部在仓库实现**（NestJS、API-first、CRUD、测试、薄前端、响应式）；**2026-05-21** 起已交付整站中/英 UI、Bangumi 映射、响应式布局；**答辩文案与图示**见 `Project_Intro/` 与 `anitrack-visuals/`。登录多用户、时间表「零 TBD」等为**锦上添花**（§10.5）。
+>
+> **课程符合性（一句话）**：内容要求已满足；组织要求（三人 ×≈7 分钟、分工、Live-Demo）在答辩当天完成。
 
-## 🗂️ 仓库结构（双文件夹架构）
+## 🗂️ 仓库结构
 
-- `anitrack/`：Next.js 前端（也保留了早期的 Next.js Route Handlers 版本，便于对照）
-- `anitrack/anitrack-backend/`：NestJS 后端（**当前主 API 供应方**，默认端口 `3001`）
-- `anitrack-tester/`：集成测试与契约测试工具集
+| 目录 | 说明 |
+|------|------|
+| `anitrack/` | Next.js 前端（`3000`） |
+| `anitrack/anitrack-backend/` | NestJS 后端（**主 API**，`3001`，Swagger `/api-docs`） |
+| `anitrack-tester/` | 契约测试与 HTTP 冒烟 |
+| `anitrack-visuals/` | 答辩用架构/技术栈图示（**英文** PNG/SVG，见 `figures/`） |
+| `Project_Intro/` | 答辩材料（`项目要求.md`、`演讲大纲.md`、`PPT文字稿大纲.md`、`答辩清单.md`） |
+| `PROJECT_BLUEPRINT.md` / `TASK_PROGRESS.md` | 设计总纲与进度 |
 
 ## 🚀 项目愿景
 
@@ -80,17 +87,21 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 
 ---
 
-## 📌 下次启动备忘（架构图 & 功能示意图）
+## 📌 答辩准备（Präsentation + Live-Demo）
 
-> 与 **`TASK_PROGRESS.md` §12** 同步。功能代码本阶段已可演示；**下次打开仓库**建议优先补**图示**（答辩 / 报告 / README 插图），再考虑 §11 中的可选功能。
+> **课程符合性（一句话）**：Anitrack 已满足 Web-Technologies I 全部**内容要求**（NestJS、API-first、CRUD、测试、薄前端、响应式）；**组织要求**（三人 ×≈7 分钟、分工、Live-Demo）在答辩当天完成。  
+> 详细状态见 **`TASK_PROGRESS.md` §0**；课程要求对照 **`Project_Intro/项目要求.md`**；排练 **`Project_Intro/答辩清单.md`**。
 
-| 待办 | 说明 |
-|------|------|
-| **架构图** | 客户端 → Next.js → NestJS `:3001` → MongoDB；Bee ↔ Jikan/Bangumi；`AnimeMeta` / `AnimeEntry` / `AnimeMirror` 三集合关系 |
-| **功能示意图** | 用户动线：搜索入库、在看编辑、时间表选日、Profile 热力图点击 |
-| **制图前自检** | 双端 `npm run start:dev` + `npm run dev`；四页中英各走查一遍 |
+| 材料 | 状态 | 路径 |
+|------|------|------|
+| 课程要求（德+中） | 已就绪 | `Project_Intro/项目要求.md` |
+| PPT 大纲 / 演讲稿 | 已就绪（中文为主） | `Project_Intro/演讲大纲.md`、`PPT文字稿大纲.md` |
+| 排练清单 | 已就绪 | `Project_Intro/答辩清单.md` |
+| 图示（英文） | 已导出 | `anitrack-visuals/figures/` |
+| Swagger | 仓库已有，答辩展示 UI | `http://localhost:3001/api-docs` |
+| 实际 PPT / 截图 | **待完成** | `Project_Intro/slides/`、`screenshots/` |
 
-工具任选：Mermaid（进仓库）、draw.io / Excalidraw / Figma（导出 PNG）。细节清单见 **`TASK_PROGRESS.md` §12**。
+答辩时：**幻灯片与 Live-Demo 界面请用 English**（App 内语言切换器）。
 
 ---
 

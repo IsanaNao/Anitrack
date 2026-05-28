@@ -7,12 +7,16 @@
 
 ## 0. 当前状态（每次更新这里）
 
-- **当前阶段**：**课程规划内的核心功能已全部交付**；当前仓库处于「可演示 / 可交付」状态
+- **当前阶段**：**课程规划内的核心功能已全部交付**；仓库处于「可演示 / 可答辩」状态
+- **课程符合性（一句话）**：内容要求已在仓库实现；组织要求（7 分钟/人、分工、Live-Demo）靠 `Project_Intro` 答辩现场完成
 - **增量阶段（锦上添花）**：Auth、推荐算法、纯 Jikan Schedule 第二视图 — **非硬性**；**整站双语（§4.9）**、**清单 Bangumi 按需映射**、**响应式设计（§4.11）** 已完成
-- **正在做**：—（本阶段增量 UI 已收口）
-- **下一步（按兴趣选做）**：见 **§11**；**下次启动项目**见 **§12 备忘**（架构图 + 功能示意图）
-- **阻塞/风险**：无课程级阻塞；**`TEMP_USER_ID`** 在接入 Auth 前仍为技术债（见 §9）
-- **最后更新时间**：2026-05-21（响应式验收通过；文档与检阅收尾）
+- **答辩材料（`Project_Intro/`）**：
+  - [x] 课程要求、排练清单、**演讲大纲**、**PPT 文字稿**（中文为主 + 德/英对照）
+  - [x] 答辩图示 `anitrack-visuals/figures/*.png`（英文标签）
+  - [ ] 实际 `.pptx`（`slides/`）、Swagger/UI **英文截图**（`screenshots/`）、三人姓名分工、计时排练
+- **下一步**：按 **`Project_Intro/答辩清单.md`** 完成 PPT/截图并排练（≈7 分钟/人）；演示时 App 切 **English**
+- **阻塞/风险**：无课程级阻塞；**`TEMP_USER_ID`** 在接入 Auth 前仍为技术债（见 §9）；时间表部分 **TBD** 为数据限制，不阻塞课程
+- **最后更新时间**：2026-05-28（三份总纲文档 + `Project_Intro` 中文文件名同步）
 
 ---
 
@@ -280,6 +284,17 @@
   - 前端：响应式（汉堡导航、时间表日期条 ±2 周、`AnimeCard` compact、热力图横向滚动）；仪表盘文案「已看完」等审校
   - 文档：§4.11 完成；§12 下次启动备忘（架构图/功能图）；`swagger.json` 更新
 
+- **2026-05-28（答辩图示 + Project_Intro）**：
+  - 新增 `anitrack-visuals/`：技术栈 / 架构 / 用户路径 / 数据流（Mermaid → PNG/SVG，**英文标签**）
+  - 新增 `Project_Intro/`：课程要求归档、**中文对照**、`演讲大纲.md`、`PPT文字稿大纲.md`
+  - §12 图示标为已完成；§0 下一步改为答辩排练
+
+- **2026-05-28（答辩 PPT/稿初稿 + 双语整理）**：
+  - `演讲大纲.md`、`PPT文字稿大纲.md` 改为 **中文为主**（投屏/口述 English 对照）
+  - `项目要求.md` 合并德文原文与中文对照；`Project_Intro` 全系材料中英双语
+- **2026-05-28（总纲文档同步）**：
+  - `README.md` / `PROJECT_BLUEPRINT.md` / `TASK_PROGRESS.md` 对齐中文答辩文件名与**项目状态**确认
+
 - **2026-05-14（文档：核心闭环 vs 锦上添花）**：
   - `PROJECT_BLUEPRINT.md`：§1.2 / §3.8.6 / §3.9.11 / §7.2 Timetable 与实现对齐；§8 阶段 3 标为已完成；**新增 §10.5**（未开发 / 建议开发 / 建议放弃）
   - `README.md`：里程碑说明、路线图阶段 5+ 改为可选、**后续增量**小表、修正 Bee Runbook 代码块 `PowerShell`、Timetable 描述（Jikan 星期兜底、`bgmId=0`）
@@ -340,7 +355,7 @@
 | 分类 | 说明 |
 |------|------|
 | **尚未开发（可选）** | **Auth / 多用户**（§6）；**推荐个性化**（§4.6 未勾选项） |
-| **建议开发（性价比高）** | 页脚/空态里解释 **TBD、`bgmId=0`**；统一间距；URL 级 locale（可选） |
+| **建议开发（性价比高）** | 页脚/空态里解释 **TBD、`bgmId=0`**；统一间距；URL 级 locale（可选）；**答辩 `.pptx` + 截图 + 排练**（`Project_Intro/` 文案已就绪） |
 | **建议放弃或长期搁置** | **Timetable 零 TBD / 全映射**（数据专项）；**独立纯 Jikan `/schedule` 全站周视图**；**过早全自动 OpenAPI 生成** |
 | **保持现状** | 单用户 `TEMP_USER_ID`；Bee 65s/3 条；柏林时区时间表 ±2 周日期条；作品标题按 UI 语言择优（§4.9）；**响应式布局**（§4.11） |
 
@@ -348,34 +363,40 @@
 
 ---
 
-## 12. 下次启动备忘（架构图 & 功能示意图）
+## 12. 答辩图示（已完成 · English labels）
 
-> **触发时机**：下次重新打开本仓库、准备答辩/文档/演示材料时，优先做**图示**，不必再大块改功能代码（除非 §11 可选项）。
+> **产出目录**：`anitrack-visuals/figures/`（PNG 插入 PPT；**幻灯片勿用中文**）  
+> **源文件 / 重导出**：`anitrack-visuals/*.mmd` → `.\anitrack-visuals\render-mermaid.ps1`
 
-### 12.1 建议交付物
+| 文件 | 用途（建议幻灯片顺序） |
+|------|------------------------|
+| `tech-stack.png` | 技术栈总览（开场） |
+| `architecture.png` | 系统架构（NestJS `3001`、Bee、MongoDB、外部 API） |
+| `user-flow.png` | 四页用户路径 |
+| `data-flow.png` | 数据流（Cache-Aside、镜像、Bangumi 映射） |
 
-| 图示 | 建议内容 | 可参考文档 / 代码 |
-|------|----------|-------------------|
-| **架构图（Architecture）** | 浏览器 → Next.js `3000` → NestJS `3001` → MongoDB；Bee 定时任务 → Jikan / Bangumi；`AnimeMeta` vs `AnimeEntry` vs `AnimeMirror` | `PROJECT_BLUEPRINT.md` §3、§3.8–3.9 |
-| **功能示意图（Feature / User Flow）** | 四页用户路径：Dashboard / Timetable / Library / Profile；搜索→加入清单→编辑→热力图点击 | `README.md` 核心特性、各 `app/(main)/*` |
-| **数据流（可选）** | `malId` 写入 → `AnimeMeta` 缓存；Bangumi 按需映射 `[i18n-map]`；时间表 `pastDays/futureDays` | `TASK_PROGRESS.md` §4.9、§4.11 |
+答辩材料目录：**`Project_Intro/`**（大纲/稿/清单已就绪；`.pptx` 与截图待补）— 见 **`Project_Intro/答辩清单.md`**。
 
-### 12.2 制图工具（任选）
+### 12.1 图示一致性要点（避免讲错）
 
-- **Mermaid**（可写在 Blueprint / README 附录，随仓库版本管理）
-- **draw.io / Excalidraw / Figma**（导出 PNG/SVG 放进 `docs/` 或课程报告目录）
-- 若课程要求 C4：补一张 **Context + Container** 即可，不必过度细化
+- API **主供应方是 NestJS `3001`**
+- 时间表：**±2 周**日期条 + 选中日列表（无 7/14 切换）
+- App **可双语**，答辩 Live-Demo 请切 **English**
+- Swagger：**不必另写文档** — 展示 `http://localhost:3001/api-docs` + `swagger.json`
 
-### 12.3 启动项目检查清单（图示工作前）
+---
 
-1. `anitrack-backend`：`npm run start:dev`（`3001`）+ `anitrack`：`npm run dev`（`3000`）
-2. 确认 `.env` / `.env.local` 含 `MONGODB_URI`、`SYNC_ENABLED=true`
-3. 浏览器走查四页（**中文 + 英文**各一遍）：`/ · `/timetable` · `/library` · `/profile`
-4. 可选：`cd anitrack-tester/contract-validator && npm run contract`（后端需已启动）
+## 13. 答辩准备（课程要求 ↔ 项目）
 
-### 12.4 图示与实现一致性要点（避免画错）
+> **课程符合性（一句话）**：内容要求已满足；组织要求待答辩现场完成（见 `Project_Intro/项目要求.md`）。
 
-- API **主供应方是 NestJS `3001`**，不是 Next Route Handlers 为主
-- 时间表：**无 7/14 切换**；**±2 周**日期条 + 选中日列表
-- 双语：**UI 词典** 与 **作品字段** 两层；中文标题依赖 Bangumi 映射（非所有条目即时有 `titleCn`）
-- Bee：**65s / 3 条** 礼貌镜像；Dashboard 当季推荐**不调用 Jikan**
+| 文档 | 说明 |
+|------|------|
+| `Project_Intro/项目要求.md` | 课程要求 **德文 + 中文对照** + 符合性一句话 |
+| `Project_Intro/演讲大纲.md` | **PPT 大纲（中文为主）**，附投屏 English |
+| `Project_Intro/PPT文字稿大纲.md` | **演讲稿（中文为主）**，附口述 English |
+| `Project_Intro/答辩清单.md` | 排练清单（中英对照） |
+| `anitrack-visuals/figures/` | 架构/技术栈/用户路径/数据流（英文 PNG） |
+| `PROJECT_BLUEPRINT.md` §11 | 课程要求与实现映射（总纲） |
+
+**待人工**：`slides/*.pptx`、`screenshots/`（Swagger + `/` `/library` `/profile` 英文 UI）、第 2 页真实分工。

@@ -1,0 +1,48 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontSize: 14px
+    lineColor: "#64748b"
+    primaryColor: "#ffffff"
+    primaryBorderColor: "#cbd5e1"
+    primaryTextColor: "#0f172a"
+  flowchart:
+    htmlLabels: true
+  securityLevel: loose
+---
+flowchart TB
+  U[User / Browser]
+
+  subgraph Client["Client"]
+    FE["ICON_NODE_NEXTJS"]
+  end
+
+  subgraph API["Backend API"]
+    BE["ICON_NODE_NESTJS"]
+    BEE[Bee Cron<br/>65s · 3 req per tick]
+  end
+
+  subgraph Data["MongoDB Atlas"]
+    DB["ICON_NODE_MONGODB"]
+    AE[AnimeEntry]
+    AM[AnimeMeta]
+    MIR[AnimeMirror]
+  end
+
+  subgraph External["External APIs"]
+    JIKAN["ICON_NODE_JIKAN"]
+    BGM["ICON_NODE_BANGUMI"]
+  end
+
+  U --> FE
+  FE -->|REST /api| BE
+  BE --> DB
+  DB --- AE & AM & MIR
+  BE --- BEE
+  BEE --> MIR
+  BEE -.-> JIKAN
+  BEE -.-> BGM
+
+  classDef plain fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
+  class AE,AM,MIR,BEE,U plain

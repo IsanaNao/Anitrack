@@ -1,0 +1,59 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontSize: 14px
+    lineColor: "#94a3b8"
+    primaryColor: "#ffffff"
+    primaryBorderColor: "#cbd5e1"
+    primaryTextColor: "#0f172a"
+---
+flowchart TB
+  Start([Open Anitrack])
+  Lang{UI locale<br/>en · zh}
+
+  subgraph Pages["Main pages"]
+    direction LR
+    Dash[Dashboard]
+    Time[Timetable]
+    Lib[Library]
+    Prof[Profile]
+  end
+
+  subgraph LibOps["Library flow"]
+    direction LR
+    Search[Search anime]
+    Add[Add to watchlist]
+    Edit[Edit entry]
+    Del[Delete entry]
+  end
+
+  subgraph ProfOps["Profile flow"]
+    direction LR
+    Heat[Monthly heatmap]
+    Act[Month activity list]
+  end
+
+  subgraph TimeOps["Timetable flow"]
+    direction LR
+    TTLoad[Load schedule<br/>±2 weeks]
+    TTAdd[Add from timetable]
+  end
+
+  Start --> Lang --> Dash
+  Dash --> Time & Lib & Prof
+
+  Lib --> Search --> Add --> Lib
+  Lib --> Edit --> Lib
+  Lib --> Del --> Lib
+
+  Prof --> Heat --> Prof
+  Prof --> Act --> Prof
+
+  Time --> TTLoad --> Time
+  Time --> TTAdd --> Time
+
+  classDef page fill:#eef2ff,stroke:#6366f1,color:#312e81
+  classDef ops fill:#f0fdf4,stroke:#22c55e,color:#14532d
+  class Dash,Time,Lib,Prof page
+  class Search,Add,Edit,Del,Heat,Act,TTLoad,TTAdd ops

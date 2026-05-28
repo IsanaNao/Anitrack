@@ -1,0 +1,66 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontSize: 14px
+    lineColor: "#64748b"
+    primaryColor: "#ffffff"
+    primaryBorderColor: "#cbd5e1"
+    primaryTextColor: "#0f172a"
+  flowchart:
+    htmlLabels: true
+  securityLevel: loose
+---
+flowchart TB
+  TITLE[Anitrack — Technology Stack]
+
+  subgraph FE["Frontend · localhost:3000"]
+    direction TB
+    FE1["ICON_NODE_NEXTJS"]
+    FE2["ICON_NODE_REACT"]
+    FE3["ICON_NODE_TYPESCRIPT"]
+    FE4["ICON_NODE_TAILWIND"]
+    FE5[TanStack Query · Zod]
+    FE6[Radix UI · Sonner · i18n]
+  end
+
+  subgraph BE["Backend · localhost:3001"]
+    direction TB
+    BE1["ICON_NODE_NESTJS"]
+    BE2["ICON_NODE_NODEJS"]
+    BE3[Mongoose · class-validator]
+    BE4[Swagger / OpenAPI 3.0]
+    BE5[Bee Cron mirror sync]
+  end
+
+  subgraph DATA["Data layer"]
+    direction TB
+    DB1["ICON_NODE_MONGODB"]
+    DB2[AnimeMeta · AnimeEntry]
+    DB3[AnimeMirror · BeeState · ApiMapping]
+  end
+
+  subgraph EXT["External data sources"]
+    direction LR
+    EX1["ICON_NODE_JIKAN"]
+    EX2["ICON_NODE_BANGUMI"]
+  end
+
+  subgraph TEST["Testing & contracts"]
+    direction LR
+    QA1[Vitest — frontend]
+    QA2[Jest — backend e2e/smoke]
+    QA3[anitrack-tester — contract smoke]
+  end
+
+  TITLE --> FE
+  FE -->|REST JSON /api| BE
+  BE --> DATA
+  BE --> EXT
+  TEST -.-> FE
+  TEST -.-> BE
+
+  classDef title fill:#eef2ff,stroke:#6366f1,stroke-width:2px
+  classDef text fill:#f8fafc,stroke:#cbd5e1
+  class TITLE title
+  class FE5,FE6,BE3,BE4,BE5,DB2,DB3,QA1,QA2,QA3 text

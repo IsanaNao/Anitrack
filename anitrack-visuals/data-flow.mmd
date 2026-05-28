@@ -1,0 +1,53 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontSize: 14px
+    lineColor: "#94a3b8"
+  flowchart:
+    htmlLabels: true
+  securityLevel: loose
+---
+flowchart LR
+  FE["ICON_NODE_NEXTJS_UI"]
+
+  subgraph Backend["NestJS backend"]
+    direction TB
+    BE["ICON_NODE_NESTJS"]
+    AMS[AnimeMetaService]
+    AES[AnimeEntryService]
+    Bee[BeeService]
+    JikanSvc["ICON_NODE_JIKAN"]
+    BgmSvc["ICON_NODE_BANGUMI_SVC"]
+  end
+
+  subgraph Store["MongoDB"]
+    direction TB
+    DB["ICON_NODE_MONGODB"]
+    AE[AnimeEntry]
+    AM[AnimeMeta]
+    MIR[AnimeMirror]
+    MAP[ApiMapping]
+  end
+
+  FE -->|POST malId| AMS
+  FE -->|search| JikanSvc
+  FE -->|list / stats| AES
+  FE -->|timetable| MIR
+
+  AMS --> AM & MIR
+  AMS -->|cache miss| JikanSvc
+  JikanSvc --> AM
+  AES --> AE
+  AMS --> AE
+
+  Bee -.-> JikanSvc
+  Bee -.-> BgmSvc
+  BgmSvc --> MAP & MIR
+
+  AE & AM & MIR & MAP --> DB
+
+  classDef svc fill:#f8fafc,stroke:#94a3b8
+  classDef col fill:#f0fdf4,stroke:#22c55e
+  class AMS,AES,Bee svc
+  class AE,AM,MIR,MAP col

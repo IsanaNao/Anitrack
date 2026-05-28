@@ -3,6 +3,8 @@
 > 本文档是 Anitrack 的“设计与实现总纲 / 杂项笔记入口”。内容允许很杂、持续追加。  
 > 课程目标导向：**API-First、前后端解耦、逻辑在后端、可测试、响应式 UI**。
 
+> **项目状态（2026-05-28）**：**课程内容要求已在代码库闭环**；答辩侧文案与图示已就绪（`Project_Intro/`、`anitrack-visuals/`），**待** `.pptx`、英文截图与现场排练。进度细节见 **`TASK_PROGRESS.md` §0**。
+
 ---
 
 ## 0. 项目概览
@@ -836,6 +838,32 @@ anitrack-backend/src/modules/bee/
 
 ---
 
+## 11. 课程要求与 Anitrack 映射（答辩用，2026-05-28）
+
+> **课程符合性（一句话）**：Anitrack 在代码与仓库层面已满足课程全部**内容要求**；**组织要求**（三人各约 7 分钟、分工说明、Präsentation + Live-Demo）需在答辩现场由 `Project_Intro` 材料完成。
+
+> 课程原文（德文 + 中文）：**`Project_Intro/项目要求.md`**  
+> 答辩清单：**`Project_Intro/答辩清单.md`** · PPT 大纲：**`演讲大纲.md`** · 稿：**`PPT文字稿大纲.md`**
+
+| 课程要求 | Anitrack 实现 |
+|----------|----------------|
+| Backend-Framework **NestJS** | `anitrack-backend/`（NestJS 11） |
+| Backend: Business-Logik + Datenhaltung | 状态机、Heatmap 聚合、Bee；MongoDB |
+| HTTP-API, CRUD | `/api/anime` GET/POST/PATCH/DELETE |
+| **API first** | `swagger.json` + `/api-docs`；契约测试 |
+| API für Frontend + Script-Clients | Next.js `fetcher`；`anitrack-tester` |
+| Integrationstests (API) | Jest e2e/smoke；Vitest integration；contract-validator |
+| Unittests (Business-Logik) | `heatmap-calc`；Jest 单测 |
+| Frontend: wenig Business-Logik | 统计/校验在后端；前端渲染 + 表单 |
+| Responsive Design | §7、`TASK_PROGRESS.md` §4.11 |
+| Präsentation ~7 min/Person, Rollen | 分工写入 PPT 第 2 页（`Project_Intro/演讲大纲.md`）；`.pptx` 待建 |
+
+**Swagger**：已维护于 `anitrack-backend/swagger.json`（英文描述），**答辩展示 UI 即可，无需重复撰写完整 API 手册**。
+
+**图示（幻灯片）**：`anitrack-visuals/figures/*.png`（英文）。
+
+---
+
 ## 9. 备注区（随手记）
 
 - **Auth**：课程未要求时可维持单用户 + `TEMP_USER_ID`；多用户见 **§3.10**。属**锦上添花**，非当前阻塞。
@@ -850,7 +878,15 @@ anitrack-backend/src/modules/bee/
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-05-21：Swagger Bee POST + 契约按方法冒烟**；**整站双语 i18n**；**2026-05-14：核心交付闭环**）
+## 10. 实施进度快照（与仓库同步，**2026-05-28：答辩材料文案 + 图示 + 总纲同步**；**2026-05-21：Swagger / i18n / 响应式**；**2026-05-14：核心交付闭环**）
+
+| 维度 | 状态 |
+|------|------|
+| 课程**内容**要求（NestJS、CRUD、API-first、测试、薄前端、响应式） | **已满足** |
+| 核心功能（Watchlist、统计/热力图、Bee、Dashboard/Library/Profile/Timetable） | **已交付** |
+| 答辩**组织**要求（7 min/人、分工、Live-Demo） | **答辩当天完成** |
+| 答辩材料（大纲/稿/清单/图示） | **已就绪** |
+| 答辩材料（`.pptx`、英文截图、排练） | **待完成** |
 
 以下结论基于 **真实请求 + 数据库读写**（`anitrack-tester/api-test-suite/run-all.js`）、**仓库内 Vitest**（`npm test` / `npm run test:integration`），以及 **Contract Testing**（`anitrack-tester/contract-validator/run-contract-test.js`，**严格模式**：`CONTRACT_PENDING_PATHS` 为空）。
 
@@ -894,7 +930,8 @@ anitrack-backend/src/modules/bee/
 | 类型 | 内容 |
 |------|------|
 | **尚未开发（可选）** | **登录与多用户隔离**（§3.10）；**推荐个性化**（基于 `AnimeEntry` 的加权/每日推荐） |
-| **建议开发（锦上添花、性价比高）** | 小范围 **UI 一致性**（间距、空态）；**页脚与排障文案**（Bangumi 未映射 / TBD）；**URL 级 locale**；**架构图 / 功能示意图**（见 `TASK_PROGRESS.md` §12） |
+| **建议开发（锦上添花、性价比高）** | 小范围 **UI 一致性**（间距、空态）；**页脚与排障文案**（Bangumi 未映射 / TBD）；**URL 级 locale**；**答辩 PPT/稿**（`Project_Intro/`） |
+| **已完成（答辩图示）** | **`anitrack-visuals/figures/`** — tech-stack / architecture / user-flow / data-flow（**English labels**，见 `TASK_PROGRESS.md` §12） |
 | **建议放弃或长期搁置（ROI 低或与现行路线重复）** | **Timetable「零 TBD / 全映射」数据专项**（与 §1.2 已知缺口同类：无稳定免费源时难 100% 无待定钟点）；**并行维护「纯 Jikan `/schedule` 周视图 + 新页面」**；**追求 100% 播出钟点无 TBD**；**过早 zod-to-openapi 全量生成** |
 | **保持现状即可** | 单用户 + `TEMP_USER_ID`；时间表 **Europe/Berlin**、**±2 周日期条**（`pastDays`/`futureDays`）；Bee **65s/3 条**；作品标题按 UI 语言择优（§7.5）；**响应式布局已完成**（`TASK_PROGRESS.md` §4.11） |
 

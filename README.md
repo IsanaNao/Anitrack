@@ -1,5 +1,7 @@
 # 📺 Anitrack (Ani-Tracker)
 
+**GitHub 仓库：** [https://github.com/IsanaNao/Anitrack](https://github.com/IsanaNao/Anitrack)
+
 基于 **Next.js（前端）+ NestJS（后端）+ MongoDB** 的番剧进度管理系统，支持自动化热力图统计与多维契约测试。
 
 > **里程碑（2026-05-28）**：**课程内容要求已全部在仓库实现**（NestJS、API-first、CRUD、测试、薄前端、响应式）；**2026-05-21** 起已交付整站中/英 UI、Bangumi 映射、响应式布局；**答辩文案与图示**见 `Project_Intro/` 与 `anitrack-visuals/`。登录多用户、时间表「零 TBD」等为**锦上添花**（§10.5）。
@@ -15,7 +17,8 @@
 | `anitrack-tester/` | 契约测试与 HTTP 冒烟 |
 | `anitrack-visuals/` | 答辩用架构/技术栈图示（**英文** PNG/SVG，见 `figures/`） |
 | `Project_Intro/` | 答辩材料（`项目要求.md`、`演讲大纲.md`、`PPT文字稿大纲.md`、`答辩清单.md`） |
-| `PROJECT_BLUEPRINT.md` / `TASK_PROGRESS.md` | 设计总纲与进度 |
+| `PROJECT_BLUEPRINT.md` / `TASK_PROGRESS.md` | 设计总纲与进度（英文：`docs/en/`） |
+| `5-Anitrack/` | 课程提交：`openapi.json` + `Anitrack_sourcecode.zip` |
 
 ## 🚀 项目愿景
 
@@ -101,8 +104,10 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 | Swagger | 仓库已有，答辩展示 UI | `http://localhost:3001/api-docs` |
 | 实际 PPT | **已生成** | `Project_Intro/slides/Anitrack_Defense.pptx` |
 | 截图 | **待插入** | `Project_Intro/screenshots/` → PPT 第 7/12 页 |
+| 课程提交包 | **已生成** | `5-Anitrack/openapi.json`、`5-Anitrack/Anitrack_sourcecode.zip` |
+| 教授用英文文档 | **已生成** | `docs/en/README.md`、`PROJECT_BLUEPRINT.md`、`TASK_PROGRESS.md` |
 
-答辩时：**幻灯片与 Live-Demo 界面请用 English**（App 内语言切换器）。
+答辩时：**幻灯片与 Live-Demo 界面请用 English**（App 内语言切换器）。PPT 需**导出 PDF** 单独提交。
 
 ---
 
@@ -111,7 +116,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 ### 1) 克隆并安装
 
 ```bash
-git clone https://github.com/YourUsername/anitrack.git
+git clone https://github.com/IsanaNao/Anitrack.git
 cd Anitrack
 ```
 

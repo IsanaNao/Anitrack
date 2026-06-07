@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -22,7 +21,10 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/i18n/I18nProvider";
 import { useAnimeDisplay } from "@/i18n/useAnimeDisplay";
+import { formatWeekdayBerlin } from "@/lib/formatBerlinDate";
 import type { createTranslator } from "@/i18n/translate";
+
+const COL_W = 200;
 
 function todayYmdBerlin(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -79,34 +81,34 @@ function TimetableRow({
     <button
       type="button"
       onClick={() => onSelect(it)}
-      className="group flex w-full cursor-pointer items-center gap-2.5 border-b border-pink-50/90 py-3 pr-0.5 text-left transition-colors hover:bg-pink-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 dark:border-zinc-800/90 dark:hover:bg-zinc-900/50"
+      className="group w-full cursor-pointer rounded-lg px-1.5 py-2 text-left transition-colors hover:bg-pink-50/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-violet-400 dark:hover:bg-zinc-900/60"
     >
-      <div className="w-11 shrink-0 text-right font-mono text-[12px] leading-tight tabular-nums text-slate-400 dark:text-zinc-500">
+      <div className="mb-1.5 font-mono text-[11px] leading-none tabular-nums text-slate-400 dark:text-zinc-500">
         {hasTime ? (
-          <span className="text-slate-600 dark:text-zinc-300">{it.airTimeLocal}</span>
+          <span className="font-medium text-slate-600 dark:text-zinc-300">{it.airTimeLocal}</span>
         ) : (
           <span className="text-slate-300 dark:text-zinc-600">{t("common.tbd")}</span>
         )}
       </div>
-      <div className="h-[52px] w-[52px] shrink-0 overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200/90 dark:bg-zinc-800 dark:ring-zinc-700">
-        {it.imageUrl ? (
-          <img src={it.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400 dark:text-zinc-600">
-            {t("common.noImage")}
-          </div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium leading-snug text-slate-900 dark:text-zinc-100">
-          {displayTitle}
+      <div className="flex gap-2">
+        <div className="h-[54px] w-[38px] shrink-0 overflow-hidden rounded bg-slate-100 ring-1 ring-slate-200/90 dark:bg-zinc-800 dark:ring-zinc-700">
+          {it.imageUrl ? (
+            <img src={it.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-[9px] text-slate-400 dark:text-zinc-600">
+              {t("common.noImage")}
+            </div>
+          )}
         </div>
-        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-[12px] font-semibold text-[#fb7299] dark:text-rose-400">
+        <div className="min-w-0 flex-1">
+          <div className="line-clamp-2 text-[12px] font-medium leading-snug text-slate-900 dark:text-zinc-100">
+            {displayTitle}
+          </div>
+          <div className="mt-0.5 text-[11px] font-semibold text-[#fb7299] dark:text-rose-400">
             {episodeLabel}
-          </span>
+          </div>
           {cd ? (
-            <span className="text-[11px] text-slate-400 dark:text-zinc-500">{cd}</span>
+            <div className="mt-0.5 text-[10px] text-slate-400 dark:text-zinc-500">{cd}</div>
           ) : null}
         </div>
       </div>
@@ -117,13 +119,13 @@ function TimetableRow({
 function NowMarker({ time, t }: { time: string; t: ReturnType<typeof createTranslator> }) {
   return (
     <div
-      className="flex items-center gap-2 border-b border-violet-200/80 py-2 dark:border-violet-900/60"
+      className="my-1 flex items-center gap-1.5 px-1.5"
       aria-label={t("timetable.nowMarker", { time })}
     >
       <span className="text-violet-500 dark:text-violet-400" aria-hidden>
         🕐
       </span>
-      <span className="font-mono text-[12px] font-semibold tabular-nums text-violet-600 dark:text-violet-400">
+      <span className="font-mono text-[10px] font-semibold tabular-nums text-violet-600 dark:text-violet-400">
         {t("timetable.nowMarker", { time })}
       </span>
       <div className="h-px flex-1 bg-violet-300/80 dark:bg-violet-800/80" />
@@ -131,35 +133,102 @@ function NowMarker({ time, t }: { time: string; t: ReturnType<typeof createTrans
   );
 }
 
-function DaySchedule({
+function DayColumn({
   day,
   isToday,
   onSelectItem,
   titleFor,
   t,
+  locale,
+  colRef,
 }: {
   day: TimetableDayApi;
   isToday: boolean;
   onSelectItem: (it: TimetableItemApi) => void;
   titleFor: (it: TimetableItemApi) => string;
   t: ReturnType<typeof createTranslator>;
+  locale: "zh" | "en";
+  colRef?: (el: HTMLDivElement | null) => void;
 }) {
   const emptyLines = t("timetable.emptyDay").split("\n");
   const nowClock = nowClockBerlin();
+  const weekdayLabel = formatWeekdayBerlin(day.date, locale);
 
-  if (day.items.length === 0) {
-    return (
-      <div className="flex min-h-[180px] flex-col items-center justify-center px-4 py-10 text-center text-[13px] leading-relaxed text-slate-400 dark:text-zinc-500">
-        {emptyLines.map((line, i) => (
-          <span key={i}>
-            {line}
-            {i < emptyLines.length - 1 ? <br /> : null}
+  return (
+    <div
+      ref={colRef}
+      className={
+        "flex shrink-0 snap-center flex-col border-r border-slate-100 last:border-r-0 dark:border-zinc-800 " +
+        (isToday ? "bg-violet-50/30 dark:bg-violet-950/10" : "")
+      }
+      style={{ width: COL_W }}
+    >
+      <div
+        className={
+          "sticky top-0 z-[1] border-b border-slate-100 px-3 py-2.5 dark:border-zinc-800 " +
+          (isToday
+            ? "bg-violet-50/90 dark:bg-violet-950/40"
+            : "bg-white/95 dark:bg-zinc-950/95")
+        }
+      >
+        <div className="flex items-baseline gap-1.5">
+          <span
+            className={
+              "font-mono text-[15px] font-bold tabular-nums " +
+              (isToday ? "text-violet-700 dark:text-violet-300" : "text-slate-900 dark:text-zinc-100")
+            }
+          >
+            {day.dateLabel}
           </span>
-        ))}
+          <span className="text-[12px] text-slate-500 dark:text-zinc-400">{weekdayLabel}</span>
+        </div>
+        {isToday ? (
+          <span className="mt-0.5 inline-block text-[10px] font-medium text-violet-500 dark:text-violet-400">
+            {t("timetable.today")}
+          </span>
+        ) : null}
       </div>
-    );
-  }
 
+      <div className="flex-1 px-1 py-1">
+        {day.items.length === 0 ? (
+          <div className="flex min-h-[120px] flex-col items-center justify-center px-2 py-6 text-center text-[11px] leading-relaxed text-slate-400 dark:text-zinc-500">
+            {emptyLines.map((line, i) => (
+              <span key={i}>
+                {line}
+                {i < emptyLines.length - 1 ? <br /> : null}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <DayItems
+            day={day}
+            isToday={isToday}
+            nowClock={nowClock}
+            onSelectItem={onSelectItem}
+            titleFor={titleFor}
+            t={t}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DayItems({
+  day,
+  isToday,
+  nowClock,
+  onSelectItem,
+  titleFor,
+  t,
+}: {
+  day: TimetableDayApi;
+  isToday: boolean;
+  nowClock: string;
+  onSelectItem: (it: TimetableItemApi) => void;
+  titleFor: (it: TimetableItemApi) => string;
+  t: ReturnType<typeof createTranslator>;
+}) {
   const rows: ReactNode[] = [];
   let nowInserted = false;
 
@@ -184,20 +253,58 @@ function DaySchedule({
     rows.push(<NowMarker key="now-marker-end" time={nowClock} t={t} />);
   }
 
-  return <div className="rounded-xl bg-white dark:bg-transparent">{rows}</div>;
+  return <>{rows}</>;
+}
+
+function ScrollButton({
+  direction,
+  onClick,
+  label,
+}: {
+  direction: "left" | "right";
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className={
+        "absolute top-1/2 z-[5] flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200/80 bg-white/90 text-slate-600 shadow-md backdrop-blur-sm transition hover:bg-white hover:text-slate-900 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 " +
+        (direction === "left" ? "left-1" : "right-1")
+      }
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="size-4"
+        aria-hidden
+      >
+        {direction === "left" ? (
+          <path d="M15 18l-6-6 6-6" />
+        ) : (
+          <path d="M9 18l6-6-6-6" />
+        )}
+      </svg>
+    </button>
+  );
 }
 
 export default function TimetablePage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { title: pickTitle } = useAnimeDisplay();
   const todayIso = todayYmdBerlin();
-  const [selectedDate, setSelectedDate] = useState(todayIso);
   const [previewItem, setPreviewItem] = useState<TimetableItemApi | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [libraryEntry, setLibraryEntry] = useState<AnimeEntry | null>(null);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
-  const dateStripRef = useRef<HTMLDivElement>(null);
-  const dateBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const todayColRef = useRef<HTMLDivElement | null>(null);
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -214,37 +321,26 @@ export default function TimetablePage() {
       }),
   });
 
-  const dayByDate = useMemo(() => {
-    const m = new Map<string, TimetableDayApi>();
-    for (const d of q.data?.days ?? []) m.set(d.date, d);
-    return m;
-  }, [q.data?.days]);
-
   const orderedDays = q.data?.days ?? [];
 
-  useEffect(() => {
-    if (!orderedDays.length) return;
-    if (!dayByDate.has(selectedDate)) {
-      const fallback =
-        orderedDays.find((d) => d.date === todayIso)?.date ?? orderedDays[0]?.date;
-      if (fallback) setSelectedDate(fallback);
-    }
-  }, [orderedDays, dayByDate, selectedDate, todayIso]);
-
-  const scrollDateIntoView = useCallback((date: string) => {
-    const btn = dateBtnRefs.current.get(date);
-    const strip = dateStripRef.current;
-    if (!btn || !strip) return;
-    const left = btn.offsetLeft - strip.clientWidth / 2 + btn.clientWidth / 2;
-    strip.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+  const scrollToToday = useCallback(() => {
+    const scroll = scrollRef.current;
+    const col = todayColRef.current;
+    if (!scroll || !col) return;
+    const left = col.offsetLeft - scroll.clientWidth / 2 + col.clientWidth / 2;
+    scroll.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
   }, []);
 
   useEffect(() => {
-    if (!q.data?.days.length) return;
-    scrollDateIntoView(selectedDate);
-  }, [q.data?.days, selectedDate, scrollDateIntoView]);
+    if (!orderedDays.length) return;
+    const id = window.requestAnimationFrame(scrollToToday);
+    return () => window.cancelAnimationFrame(id);
+  }, [orderedDays, scrollToToday]);
 
-  const selectedDay = dayByDate.get(selectedDate);
+  const scrollByCols = useCallback((dir: -1 | 1) => {
+    scrollRef.current?.scrollBy({ left: dir * COL_W * 2, behavior: "smooth" });
+  }, []);
+
   const titleFor = (it: TimetableItemApi) => pickTitle(it, it.malId);
 
   const loadErr = (err: unknown) =>
@@ -296,68 +392,43 @@ export default function TimetablePage() {
             {t("common.noData")}
           </div>
         ) : (
-          <>
+          <div className="relative">
+            <ScrollButton
+              direction="left"
+              onClick={() => scrollByCols(-1)}
+              label={t("timetable.scrollLeft")}
+            />
+            <ScrollButton
+              direction="right"
+              onClick={() => scrollByCols(1)}
+              label={t("timetable.scrollRight")}
+            />
             <div
-              ref={dateStripRef}
-              className="flex gap-1 overflow-x-auto overscroll-x-contain border-b border-slate-100 px-2 py-2 [scrollbar-width:thin] dark:border-zinc-800"
-              role="tablist"
+              ref={scrollRef}
+              className="flex overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:thin] snap-x snap-mandatory"
+              role="list"
               aria-label={t("timetable.pickDay")}
             >
               {orderedDays.map((day) => {
-                const active = day.date === selectedDate;
                 const isToday = day.date === todayIso;
                 return (
-                  <button
+                  <DayColumn
                     key={day.date}
-                    ref={(el) => {
-                      if (el) dateBtnRefs.current.set(day.date, el);
-                      else dateBtnRefs.current.delete(day.date);
+                    day={day}
+                    isToday={isToday}
+                    locale={locale}
+                    colRef={isToday ? (el) => { todayColRef.current = el; } : undefined}
+                    onSelectItem={(it) => {
+                      setPreviewItem(it);
+                      setPreviewOpen(true);
                     }}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setSelectedDate(day.date)}
-                    className={
-                      "flex min-w-[3.25rem] shrink-0 flex-col items-center rounded-lg px-2.5 py-2 transition-colors " +
-                      (active
-                        ? "bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"
-                        : "text-slate-600 hover:bg-slate-50 dark:text-zinc-400 dark:hover:bg-zinc-900")
-                    }
-                  >
-                    <span
-                      className={
-                        "font-mono text-[13px] font-semibold tabular-nums " +
-                        (active ? "text-violet-700 dark:text-violet-300" : "")
-                      }
-                    >
-                      {day.dateLabel}
-                    </span>
-                    <span className="mt-0.5 text-[11px]">{day.weekdayLabel}</span>
-                    {isToday ? (
-                      <span className="mt-1 text-[10px] font-medium text-violet-500 dark:text-violet-400">
-                        {t("timetable.today")}
-                      </span>
-                    ) : (
-                      <span className="mt-1 h-[14px]" aria-hidden />
-                    )}
-                  </button>
+                    titleFor={titleFor}
+                    t={t}
+                  />
                 );
               })}
             </div>
-
-            {selectedDay ? (
-              <DaySchedule
-                day={selectedDay}
-                isToday={selectedDay.date === todayIso}
-                onSelectItem={(it) => {
-                  setPreviewItem(it);
-                  setPreviewOpen(true);
-                }}
-                titleFor={titleFor}
-                t={t}
-              />
-            ) : null}
-          </>
+          </div>
         )}
 
         <p className="border-t border-slate-100 px-4 py-2.5 text-center text-[11px] leading-relaxed text-slate-400 dark:border-zinc-800 dark:text-zinc-500">

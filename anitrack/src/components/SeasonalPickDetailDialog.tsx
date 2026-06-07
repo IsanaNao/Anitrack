@@ -3,6 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 
 import type { AnimeMeta } from "@/lib/api";
+import { DIALOG_BODY_SCROLL, DIALOG_FOOTER, DIALOG_OVERLAY, dialogContentClass } from "@/lib/dialogUi";
 import { useI18n } from "@/i18n/I18nProvider";
 import { useAnimeDisplay } from "@/i18n/useAnimeDisplay";
 
@@ -50,12 +51,12 @@ export function SeasonalPickDetailDialog({
     >
       {actualOpen ? (
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 w-[min(92vw,520px)] max-h-[min(88vh,680px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
+          <Dialog.Overlay className={DIALOG_OVERLAY} />
+          <Dialog.Content className={dialogContentClass(520)}>
             <Dialog.Title className="sr-only">{title}</Dialog.Title>
             <Dialog.Description className="sr-only">{t("seasonalDialog.srDescription")}</Dialog.Description>
 
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <div className="flex min-w-0 flex-1 gap-3">
                 <div className="h-[100px] w-[72px] shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
                   {meta.imageUrl ? (
@@ -111,16 +112,18 @@ export function SeasonalPickDetailDialog({
               </Dialog.Close>
             </div>
 
-            <div className="mt-4">
+            <div className={DIALOG_BODY_SCROLL}>
+            <div>
               <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
                 {t("common.synopsis")}
               </div>
-              <div className="mt-2 max-h-52 overflow-auto rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+              <div className="mt-2 max-h-36 overflow-auto rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 sm:max-h-52 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
                 {body ? body : <span className="text-zinc-400 dark:text-zinc-600">{t("common.noSynopsis")}</span>}
               </div>
             </div>
+            </div>
 
-            <div className="mt-5 flex flex-col-reverse gap-2 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end dark:border-zinc-800">
+            <div className={`${DIALOG_FOOTER} flex flex-col-reverse gap-2 sm:flex-row sm:justify-end`}>
               <Dialog.Close asChild>
                 <button
                   type="button"

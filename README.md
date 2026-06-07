@@ -4,7 +4,7 @@
 
 基于 **Next.js（前端）+ NestJS（后端）+ MongoDB** 的番剧进度管理系统，支持自动化热力图统计与多维契约测试。
 
-> **里程碑（2026-05-28）**：**课程内容要求已全部在仓库实现**（NestJS、API-first、CRUD、测试、薄前端、响应式）；**2026-05-21** 起已交付整站中/英 UI、Bangumi 映射、响应式布局；**答辩文案与图示**见 `Project_Intro/` 与 `anitrack-visuals/`。登录多用户、时间表「零 TBD」等为**锦上添花**（§10.5）。
+> **里程碑（2026-06-07）**：**课程内容要求已全部在仓库实现**（NestJS、API-first、CRUD、测试、薄前端、响应式）；**2026-05-21** 起已交付整站中/英 UI、Bangumi 映射、响应式布局；**2026-06-07** 增补 Mirror 当季 i18n 同步、当季推荐语言切换不 reshuffle、时间表多列 UI、Profile 热力图体验与月度强度阈值。**答辩文案与图示**见 `Project_Intro/` 与 `anitrack-visuals/`。登录多用户、时间表「零 TBD」等为**锦上添花**（§10.5）。
 >
 > **课程符合性（一句话）**：内容要求已满足；组织要求（三人 ×≈7 分钟、分工、Live-Demo）在答辩当天完成。
 
@@ -30,17 +30,18 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 
 - **状态机约束**：严格校验番剧状态迁移（如：只有 `WATCHING` 或 `DROPPED` 可以转为 `COMPLETED`），防止非法数据入库。
 - **自动时间戳管理**：当番剧标记为“已完成”时，系统会自动维护 `completedDates` 数组，支持多周目（Rewatch）记录。
-- **高性能聚合查询**：使用 MongoDB Aggregation Pipeline 进行数据规范化与统计，后端直接输出带“强度值（Intensity）”的热力图 JSON。
+- **高性能聚合查询**：使用 MongoDB Aggregation Pipeline 进行数据规范化与统计，后端直接输出带“强度值（Intensity）”的热力图 JSON（月度权重：**1→1，2–4→2，5–8→3，≥9→4**）。
 - **统计接口后端化**：
   - `GET /api/stats/summary`：Profile/Dashboard 顶部指标（总量、完成数、在看数、平均评分、已看总集数）
   - `GET /api/stats/activity?month=YYYY-MM`：月度 Activity（Added/Completed 列表），前端不再全量拉取再过滤
-  - `GET /api/anime-meta/seasonal-random`：Dashboard 当季推荐卡片池（MongoDB `$sample` / `AnimeMirror`，**不调用 Jikan**）；卡片可点开 **`SeasonalPickDetailDialog`**（封面、简介、加入清单）
+  - `GET /api/anime-meta/seasonal-random`：Dashboard 当季推荐（MongoDB `$sample` / `AnimeMirror`，**不调用 Jikan**）；抽样优先已有 `titles.cn`；读路径 **同步 Bangumi 映射** 后返回全量多语言字段；卡片可点开 **`SeasonalPickDetailDialog`**
+  - `POST /api/anime-meta/mirror-i18n-sync`：客户端启动时后台补全 Mirror 当季池 Bangumi 映射（`MirrorI18nBootstrap`）
 - **Ownership 双表建模（阶段 3 关键底座）**：将番剧“客观元数据”与用户“个人进度”拆分为 `AnimeMeta`（公有缓存）与 `AnimeEntry`（用户私有），避免未来多用户场景的毁灭性重构。
 - **基于 `malId` 的 Cache-Aside 缓存层**：创建条目时按 `malId` 先查 `AnimeMeta`，未命中则抓取 Jikan 并缓存，降低第三方 API 压力与 429 风险。
 - **Jikan 请求缓存（24h）**：后端引入 NestJS `CacheModule`，所有 Jikan 三方请求统一走缓存，显著缓解 429。
-- **新番时间表（Timetable）**：**`/timetable`** — 顶部**可左右滑动的日期条**（柏林时区 **前后各 2 周**），下方为**选中日**的番剧列表（已移除 7/14 天切换）；`GET /api/anime-meta/timetable?pastDays=14&futureDays=14`。数据来自当季 **`AnimeMirror`**；星期以 Bangumi 为主、Jikan 广播字段兜底。**已知限制**：部分条目钟点仍为 **TBD**。
-- **整站双语（i18n）**：导航 **中文 / English**；作品标题/简介按 UI 语言择优（Bangumi `titleCn` 等）。清单老番 **后台 Bangumi 映射**（日志 `[i18n-map]`）；手动 **`POST /api/bee/map-mal-ids?malIds=...`**。见 **`PROJECT_BLUEPRINT.md` §7.5**。
-- **响应式（已完成）**：汉堡菜单、`AnimeCard` 紧凑模式、仪表盘双行横滑、档案热力图固定列宽横向滚动。见 **`TASK_PROGRESS.md` §4.11**。
+- **新番时间表（Timetable）**：**`/timetable`** — **多列横向滚动**（固定列宽，参考 animeko）；**柏林时区前后各 2 周**（`pastDays=14&futureDays=14`）；每列一天，列内全量条目 + 今天高亮；星期由前端 `formatWeekdayBerlin` 按 UI 语言显示。数据来自当季 **`AnimeMirror`**；星期以 Bangumi 为主、Jikan 广播字段兜底。**已知限制**：部分条目钟点仍为 **TBD**。
+- **整站双语（i18n）**：导航 **中文 / English**；作品标题/简介按 UI 语言择优（`pickAnimeTitle`，Bangumi `titleCn` 等）。**切换语言不重新随机当季推荐**（同一批 `malId`，只换显示字段）。清单老番 **后台 Bangumi 映射**（日志 `[i18n-map]`）；手动 **`POST /api/bee/map-mal-ids?malIds=...`**。见 **`PROJECT_BLUEPRINT.md` §7.5**。
+- **响应式（已完成）**：汉堡菜单、`AnimeCard` 紧凑模式、仪表盘双行横滑、档案热力图桌面 **16px** 格子 + 横向滚动、Dialog 移动端近全屏可滚动。见 **`TASK_PROGRESS.md` §4.11**。
 - **🐝 Intelligent Data Mirroring（Bee System）**：
   - 内置后台同步引擎，以 **65s / 3 req** 的“礼貌频率”自动镜像 Jikan 元数据至 MongoDB（`AnimeMirror`）。
   - 支持**断点续爬**与**被动抓取信号**：重启后基于 `lastUpdated` 继续同步，不会从头重复；读路径 miss 会 enqueue，后台逐步补齐热点数据。
@@ -75,7 +76,7 @@ Anitrack 不仅仅是一个简单的“看番记录本”。它旨在通过自�
 - [x] 阶段 1：核心 Watchlist CRUD 与数据库持久化
 - [x] 阶段 2：统计聚合逻辑与多维自动化测试
 - [x] 阶段 3：Jikan 影子库缓存（`AnimeMeta`）+ 前端主界面开发（Dashboard/The Pulse、Profile Heatmap、Library Dialog）
-- [x] 阶段 4：**`/timetable`** 与 **`GET /api/anime-meta/timetable`**；Dashboard 当季推荐与 **`SeasonalPickDetailDialog`**
+- [x] 阶段 4：**`/timetable`** 多列横向 UI + **`GET /api/anime-meta/timetable`**；Dashboard 当季推荐、Mirror i18n 与 **`SeasonalPickDetailDialog`**
 - [x] 阶段 5（体验）：**整站双语**（`TASK_PROGRESS.md` **§4.9**）
 - [x] 阶段 5+（体验）：**响应式布局**（`TASK_PROGRESS.md` **§4.11**）
 - [ ] 阶段 6+（**可选**）：**Auth 与多用户**；推荐个性化；Timetable 数据「零 TBD」专项 — 见 **`PROJECT_BLUEPRINT.md` §10.5**

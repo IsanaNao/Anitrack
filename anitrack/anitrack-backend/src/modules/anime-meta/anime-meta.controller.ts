@@ -1,4 +1,4 @@
-import { Controller, Get, Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { ApiErrorException } from '../../shared/http/api-error.filter';
 import { AnimeMetaService } from './anime-meta.service';
 import { AnimeMetaSearchQueryDto } from './dto/anime-meta-search.dto';
@@ -31,6 +31,14 @@ export class AnimeMetaController {
   ) {
     const capped = Math.min(12, Math.max(1, limit));
     return this.animeMeta.randomSeasonalFromMirror(capped);
+  }
+
+  /**
+   * 客户端启动时触发：为 Mirror 当季池后台补 Bangumi 映射（不阻塞响应）。
+   */
+  @Post('mirror-i18n-sync')
+  async mirrorI18nSync() {
+    return this.animeMeta.scheduleSeasonalMirrorI18nSync();
   }
 
   /**

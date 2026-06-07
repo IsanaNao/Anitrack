@@ -3,7 +3,7 @@
 > 本文档是 Anitrack 的“设计与实现总纲 / 杂项笔记入口”。内容允许很杂、持续追加。  
 > 课程目标导向：**API-First、前后端解耦、逻辑在后端、可测试、响应式 UI**。
 
-> **项目状态（2026-05-28）**：**课程内容要求已在代码库闭环**；答辩侧文案与图示已就绪（`Project_Intro/`、`anitrack-visuals/`），**待** `.pptx`、英文截图与现场排练。进度细节见 **`TASK_PROGRESS.md` §0**。
+> **项目状态（2026-06-07）**：**课程内容要求已在代码库闭环**；答辩侧文案与图示已就绪（`Project_Intro/`、`anitrack-visuals/`），**待** `.pptx`、英文截图与现场排练。进度细节见 **`TASK_PROGRESS.md` §0**。
 
 ---
 
@@ -41,8 +41,8 @@
 ### 1.2 Seasonal Schedule / 新番时间表（集成外部数据）
 现行实现以 **Bee `AnimeMirror`（当季 Jikan 镜像）** 为主，**Bangumi 映射优先**、**Jikan `broadcast` 为星期与钟点兜底**；不单独依赖 Jikan 的 schedule 端点。
 
-- **后端**：`GET /api/anime-meta/timetable?days=7|14` — 当季 `tier=seasonal` 镜像；**分桶星期**优先 `bangumi.weekday`，缺失时回退 **`broadcast.day` / `broadcast.string`**（与 Bangumi 同为 1=周一…7=周日）；东京墙钟经 **`dayjs`（`Asia/Tokyo`）→ `Europe/Berlin`** 落到各**柏林日历日**列（详见 **§3.8.6**）。未映射 Bangumi 时响应中 **`bgmId` 可为 `0`**，详情区不展示 Bangumi 链。
-- **前端**：`/timetable` — 横向日期列、条目卡片、倒计时；列内 **全量渲染** API 返回的 `items`（无「每列最多 N 条」UI 截断）；布局采用 **`items-start`** 各列按内容高度对齐。点击条目打开详情并可 **加入清单（PLANNED / WATCHING）** 或跳转已有条目的 `AnimeEntryDialog`；**不**再做「番剧索引」占位 Tab。
+- **后端**：`GET /api/anime-meta/timetable?pastDays=14&futureDays=14`（兼容旧 `days=` 仅向未来）— 当季 `tier=seasonal` 镜像；**分桶星期**优先 `bangumi.weekday`，缺失时回退 **`broadcast.day` / `broadcast.string`**（与 Bangumi 同为 1=周一…7=周日）；东京墙钟经 **`dayjs`（`Asia/Tokyo`）→ `Europe/Berlin`** 落到各**柏林日历日**列（详见 **§3.8.6**）。未映射 Bangumi 时响应中 **`bgmId` 可为 `0`**，详情区不展示 Bangumi 链。
+- **前端**：`/timetable` — **多列横向滚动**（固定列宽约 200px，参考 animeko）；每列为一天，列内 **全量渲染** API 返回的 `items`；左右箭头导航、**今天列高亮**；**星期标签**由前端 `formatWeekdayBerlin(date, locale)` 按 UI 语言格式化（不依赖后端 `weekdayLabel`）。点击条目打开详情并可 **加入清单（PLANNED / WATCHING）** 或跳转已有条目的 `AnimeEntryDialog`；详情 Dialog **`z-50`**，避免被日期列头遮挡。
 - **展示语言（时间表域）**：API 返回多语言快照（`title` / `titleCn` / `titleJp` / `titleEn`，`synopsisCn` / `synopsisEn` / `synopsisJa`）；**前端按 UI 语言选取主标题与简介**（见 **§7.5**），不再在时间表页写死英文优先。
 
 > **暂缓（已知缺口）**：**部分番剧不出现在某一列**：Bangumi 标题未匹配则无 enrich；且若 Jikan **`broadcast.day` 为 Unknown** 且无 `bangumi.weekday`，则无法分桶。**播出钟点 TBD**（`airTimeLocal` 为空）：上游无可靠 `airTime`/时刻字段时仍会出现。已做 **`parseBangumiWallClockWithExtendedHours`**、`airDate` 含 `T` 时刻、`broadcast.time` 合并、**`POST /api/bee/sync-step?refreshSeasonalAirTimes=true`**、响应 **`airTime`** 与 F12 日志。**完整排钟与 100% 映射**依赖数据源或运营策略，属**锦上添花**，不阻塞课程核心交付（见 **§10.5**）。
@@ -57,8 +57,10 @@
   - `episodeCount`：当月累计观看集数（按 `completedAt` 月份累加 `episodesWatched`）
 - **输出结构**：`months[]`（每月一个格子），包含 `intensity`（0–4）
 - **交互（前端）**：
-  - 悬停：GitHub 风格浮动 Tooltip（`pointer-events: none`，避免 hover 干扰）
+  - 悬停：GitHub 风格浮动 Tooltip（`pointer-events: none`；窄屏/底部格子 **智能上翻**，避免被容器裁切）
   - 点击：锁定月份，在热力图下方展示 “Activity for YYYY-MM”（Added/Completed 时间轴列表）
+  - 起始月：`StartMonthPicker`（i18n 年/月下拉，替代 `<input type="month">` 的浏览器原生语言）
+  - 桌面端格子 **16×16px**（间距 3px），年份标签 **防重叠** 绝对定位
 
 ### 1.4 Data Persistence（MongoDB）
 使用 MongoDB 存储用户与个性化 watchlist、以及 heatmap 统计所需的日期维度数据。
@@ -270,9 +272,9 @@
 
 #### 强度等级（0-4，后端定义）
 - `intensity=0` 表示该月无活动
-- 其余按阈值映射到 1-4（阈值策略见第 5 章；当前可用 `addedCount+completedCount` 做权重）
+- 权重 `score = addedCount + completedCount`；阈值见 **§5.2**（现行：1→1，2–4→2，5–8→3，≥9→4）
 
-> 备注：旧版“按天绿墙（weeks→days，from/to）”属于历史实现/测试遗留，不再作为主 UI 的契约目标。
+> 备注：旧版“按天绿墙（weeks→days）”已移除，不再作为契约或测试目标。
 > 兼容策略：前端 `anitrack/src/app/api/stats/heatmap/route.ts` 已改为 **代理到 NestJS**（`http://localhost:3001/api/stats/heatmap`），全仓对外语义以 NestJS 为准。
 > 前端 Activity 列表筛选口径：使用 `dayjs.utc(...).format('YYYY-MM')` 统一与后端 UTC 月聚合，避免时区跨月导致的“统计有数据但列表为空”。
 
@@ -347,19 +349,24 @@
 
 #### 3.8.5 当季随机推荐（`seasonal-random`，纯 Mongo / 无 Jikan HTTP）
 
-> Dashboard「新番随机推荐」读路径：**不调用 Jikan**，仅依赖 Bee 已写入的 `AnimeMirror`（当季队列需已同步 `data`）。
+> Dashboard「当季推荐」读路径：**不调用 Jikan**，仅依赖 Bee 已写入的 `AnimeMirror`（当季队列需已同步 `data`）。**展示语言与抽样解耦**：API 一次返回 `titleCn` / `titleEn` / `titleJp` 等全量字段；前端 `pickAnimeTitle(locale, …)` 按 UI 语言选取；**切换语言不重新 `$sample`**。
 
 - **Endpoint**：`GET /api/anime-meta/seasonal-random?limit=`（`limit` 可选，默认 4；后端将请求限制在约 1–12 条）
-- **数据源**：集合 `AnimeMirror`，匹配 `tier=seasonal` 且 `data` 已存在；使用 MongoDB 聚合 **`$sample`** 随机抽样
-- **响应**：`{ items: [...] }`，单项字段与 `AnimeMeta` 展示模型对齐（`malId/title/imageUrl/score/genres/totalEpisodes/synopsis/...`）
-- **前端（Dashboard）**：推荐卡片可点击打开 **`SeasonalPickDetailDialog`**（封面、评分、类型、简介、**加入清单**）；列表下方「加入清单」按钮保留
+- **数据源**：集合 `AnimeMirror`，匹配 `tier=seasonal` 且 `data` 已存在；MongoDB 聚合 **`$sample`** 随机抽样；**优先**已有 `titles.cn` 的文档，减少中文界面英文标题
+- **Bangumi 映射（读路径）**：
+  - 每次抽样后对缺 `titleCn` 的 `malId` **同步** `ensureI18nForMalIds`（最多一批），再返回；并 fire-and-forget 全池 `scheduleSeasonalMirrorI18nSync`
+  - 客户端启动：`POST /api/anime-meta/mirror-i18n-sync` → 后台分批映射整个 seasonal 池；`MirrorI18nBootstrap`（挂 `(main)/layout`）触发，映射完成后可选 invalidate 推荐/时间表缓存
+- **响应**：`{ items: [...] }`，单项字段与 `AnimeMeta` 展示模型对齐（`malId/title/titleCn/titleEn/titleJp/imageUrl/score/genres/totalEpisodes/synopsis/synopsisCn/...`）
+- **前端（Dashboard）**：
+  - React Query **`queryKey` 不含 `locale`**；仅 **`seasonalPickNonce`**（「换一批」）触发重新抽样
+  - 推荐卡片可点击打开 **`SeasonalPickDetailDialog`**；列表下方「加入清单」按钮保留
 - **空数据**：若当季镜像尚未写入或仍在同步中，可能返回 `items: []`（前端应展示空态与 Bee 运行提示）
 
 #### 3.8.6 新番时间表（`GET /api/anime-meta/timetable`）
 
 > 读路径：**不调用 Jikan HTTP**（依赖 `AnimeMirror` 中已写入的 `data` + Bee 维护的 Bangumi 字段；**星期**在应用层合并 Bangumi 与 Jikan `broadcast`）。
 
-- **Endpoint**：`GET /api/anime-meta/timetable?days=`（`days` 默认 7，最大 14）
+- **Endpoint**：`GET /api/anime-meta/timetable?pastDays=14&futureDays=14`（默认前后各 2 周；兼容旧 `days=` 仅向未来）
 - **过滤条件（Mongo）**：`tier=seasonal`、`malId>0`；应用层再保留 **`resolveTimetableWeekdayBangumi` 可解析出 1–7** 的文档（优先 `bangumi.weekday`，否则 Jikan **`broadcast.day` / `broadcast.string`**）。
 - **响应**：`{ timezone: "Europe/Berlin", days: [ { date, dateLabel, weekdayLabel, items[] } ] }`
 - **单项 `items[]`（要点）**：
@@ -612,15 +619,20 @@ anitrack-backend/src/modules/bee/
   - `episodeCount`：按 `completedAt` 所在月份累加 `episodesWatched`
 - （现行）按月聚合为“人生纸格（月）”：返回 `months[]`，每个月包含 `addedCount/completedCount/episodeCount/intensity`
 
-#### 建议的强度阈值策略（可调整）
-为了适配不同用户数据量，建议使用“固定阈值 + 上限截断”的简单可解释策略：
-- `count = 0` → 0
-- `count = 1` → 1
-- `count = 2` → 2
-- `count = 3-4` → 3
-- `count >= 5` → 4
+#### 建议的强度阈值策略（现行）
+权重 `score = addedCount + completedCount`（`episodeCount` 仅用于 tooltip，不参与强度）：
 
-> 优点：易解释、稳定；缺点：对重度用户可能全是 4。  
+| 权重 `score` | `intensity` |
+|-------------|-------------|
+| 0 | 0 |
+| 1 | 1 |
+| 2–4 | 2 |
+| 5–8 | 3 |
+| ≥ 9 | 4 |
+
+实现：`anitrack-backend/src/common/utils/monthly-heatmap-intensity.ts`（Jest 单测同目录 `.spec.ts`）。
+
+> 优点：易解释、稳定；对重度用户需更高权重才到深绿。  
 > 备选：按分位数动态阈值（更“自适应”，但更难解释，且测试要更精确）。
 
 ---
@@ -655,14 +667,15 @@ anitrack-backend/src/modules/bee/
 - **When**：请求 heatmap
 - **Then**：状态码 **400**，错误结构符合通用错误体
 
-### 6.2 单元测试（Unit Tests）：heatmap 强度映射纯函数
-- `count=0 → 0`
-- `count=1 → 1`
-- `count=2 → 2`
-- `count=3 → 3`
-- `count=4 → 3`（若采用 3-4 → 3）
-- `count=5 → 4`
-- 非法输入（负数/NaN）→ 抛错或归零（由实现决定，但要一致并测试）
+### 6.2 单元测试（Unit Tests）：heatmap 月度强度映射
+纯函数：`calculateMonthlyIntensity`（`monthly-heatmap-intensity.ts`）
+
+- `score=0 → 0`
+- `score=1 → 1`
+- `score=2-4 → 2`
+- `score=5-8 → 3`
+- `score≥9 → 4`
+- 非法输入（负数/NaN）→ 按截断后计算（与实现一致并测试）
 
 ---
 
@@ -677,8 +690,7 @@ anitrack-backend/src/modules/bee/
   - `http://localhost:3001/swagger.json`
 - **后端自检（不依赖外部 Jikan）**：跑 NestJS 的 e2e/smoke（会 mock `AnimeMetaService`，且可用内存 Mongo）
   - 适合定位：错误信封、状态机、heatmap 结构、CRUD 基础链路
-- **前端侧算法/集成（Next.js 旧 route handler 时代遗留）**：Vitest（heatmapCalc 单测 + heatmap integration）
-  - 适合定位：heatmap 纯函数与 swagger 结构对齐、Mongo 连接/清理逻辑
+- **前端代理集成**：Vitest `heatmap.integration.test.ts`（断言 Next.js heatmap 路由转发 NestJS 并返回 `{ start,end,months[] }`）
 - **契约回归（Swagger vs 运行时）**：`anitrack-tester/contract-validator`
   - 适合定位：路径缺失/字段不一致/错误码与信封不一致/分页结构偏差
 - **端到端冒烟（HTTP 层）**：`anitrack-tester/api-test-suite/run-all.js`
@@ -689,7 +701,7 @@ anitrack-backend/src/modules/bee/
 目录：`anitrack/anitrack-backend/`
 
 - **单元/集成（Jest）**
-  - `npm test`
+  - `npm test`（含 `monthly-heatmap-intensity.spec.ts`）
 - **e2e 与 smoke**
   - `test/app.e2e-spec.ts`：最小 e2e（`GET /api`）
   - `test/app.smoke-spec.ts`：覆盖 heatmap、状态机、CRUD（mock `AnimeMetaService`；无 `MONGODB_URI` 时启用 `mongodb-memory-server`）
@@ -698,11 +710,9 @@ anitrack-backend/src/modules/bee/
 
 目录：`anitrack/`
 
-- **单测**：`npm test`
-  - 例：`src/lib/__tests__/heatmap-calc.test.ts`（强度映射、周结构）
+- **单测**：`npm test`（Vitest；无 heatmap 纯函数单测，强度逻辑在后端 Jest）
 - **集成测试**：`npm run test:integration`
-  - 例：`src/__tests__/integration/heatmap.integration.test.ts`
-  - 说明：需要真实 `MONGODB_URI`（从 `anitrack/.env.local` 由 `vitest.integration.config.ts` 自动加载）
+  - 例：`src/__tests__/integration/heatmap.integration.test.ts`（NestJS 代理契约）
 
 ### 6.3.4 契约测试（Contract Validator）
 
@@ -750,17 +760,23 @@ anitrack-backend/src/modules/bee/
   - 右侧下方：Seasonal Schedule（表格/卡片）
 
 #### Dashboard（`/`）— 当季推荐
-- 「新番随机推荐」：**卡片可点击**打开 **`SeasonalPickDetailDialog`**（封面、评分、话数、类型、简介去 HTML、**加入清单 PLANNED**）；列表内保留「加入清单」快捷按钮；成功写入后关闭 Dialog 并刷新清单缓存
+- 「当季推荐」：**卡片可点击**打开 **`SeasonalPickDetailDialog`**（封面、评分、话数、类型、简介去 HTML、**加入清单 PLANNED**）；列表内保留「加入清单」快捷按钮；成功写入后关闭 Dialog 并刷新清单缓存
+- **换一批**递增 `seasonalPickNonce` 重新抽样；**切换 UI 语言不触发**重新请求（见 **§3.8.5**、**§7.5**）
 
 #### Timetable（时间表页）
-- 形态：横向滚动的“日期列”（每列为一天，柏林日历日）；列内 **`items-start`** 对齐，**全量渲染** API 返回条目（无「每列最多 N 条」截断）；条目按 `airTimeLocal` 字符串排序
-- 数据：`GET /api/anime-meta/timetable`（见 **§3.8.6**）；无本地钟点时左侧显示 **TBD**；缺 Bangumi 映射时可能 **`bgmId=0`**（见 **§1.2**、**§10.5**）
-- 交互：7 / 14 天切换；左右箭头横向滚动；**点击卡片** → 详情 Dialog（MAL / Bangumi ID、Synopsis、`POST /api/anime` 追更或打开已有条目的编辑 Dialog）
+- 形态：**多列横向滚动**（列宽约 200px，参考 animeko）；每列为柏林日历日；列内 **`items-start`** 对齐，**全量渲染** API 返回条目；条目按 `airTimeLocal` 字符串排序；**今天列**高亮并初始滚动居中
+- 数据：`GET /api/anime-meta/timetable?pastDays=14&futureDays=14`（见 **§3.8.6**）；无本地钟点时显示 **TBD**；缺 Bangumi 映射时可能 **`bgmId=0`**（见 **§1.2**、**§10.5**）
+- 交互：左右箭头横向滚动；**星期**由 `formatWeekdayBerlin` 按 UI locale 渲染；**点击卡片** → 详情 Dialog（`z-50`，移动端近全屏可滚动；MAL / Bangumi ID、Synopsis、`POST /api/anime` 追更或打开已有条目的编辑 Dialog）
+
+#### Dialog（共用）
+- 样式：`lib/dialogUi.ts` — 移动端近全屏 + 可滚动 body；桌面居中 modal；**`z-50`** 覆盖 sticky 页头/日期列
+- 删除：`AnimeEntryDialog` 需 **二次确认**（i18n：`entryDialog.deleteConfirm*`）
 
 ### 7.3 Heatmap 组件规范
-- 单元格：正方形（例如 10-14px），间距 2px
+- 单元格：桌面 **16×16px**（间距 3px）；窄屏随容器缩放；间距 2–3px
 - 颜色：按 `intensity 0-4` 对应 5 档绿色（0 为灰/背景）
-- 窄屏：容器 `overflow-x-auto`，保持单元格不被压扁
+- 窄屏：容器 `overflow-x-auto`，保持单元格不被压扁；tooltip 智能上/下翻转
+- 起始月：`StartMonthPicker`（中/英年月标签，与壳层 i18n 一致）
 
 ### 7.4 Schedule 组件规范
 - 移动端：按“星期”折叠分组，卡片流
@@ -778,11 +794,18 @@ anitrack-backend/src/modules/bee/
 | 运行时 | `I18nProvider` + `useI18n().t(key, params)`；根级挂在 `app/providers.tsx` |
 | 切换器 | `TopNav` → `LanguageSwitcher`；偏好 **`localStorage`** 键 `anitrack.locale`（`zh` \| `en`），并设置 `document.documentElement.lang` |
 | 作品标题/简介 | `anime-display.ts`：`pickAnimeTitle` / `pickAnimeSynopsis`；组件侧用 `useAnimeDisplay()` |
+| Mirror 当季映射 | `MirrorI18nBootstrap` → `POST /api/anime-meta/mirror-i18n-sync`；后台补全 seasonal 池 Bangumi 字段 |
 
 **`pickAnimeTitle` 优先级（简述）**
 
-- UI = **zh**：`titleCn` → `title` → `titleJp` → `titleEn`
+- UI = **zh**：`titleCn` → `title`（含 CJK）→ `titleJp` → `titleEn`
 - UI = **en**：`titleEn` → `title` → `titleJp` → `titleCn`
+
+**当季推荐与语言切换**
+
+- API **不带 `locale` 参数**；响应含多语言快照
+- Dashboard **`queryKey` 不含 `locale`**：切语言只重算 `displayTitle`，**不换一批番剧**
+- 仅用户点击「换一批」或（可选）Bootstrap 映射完成后的 cache invalidate 会重新请求列表
 
 简介同理：`synopsisCn`（Bangumi）与 `synopsisEn` / `synopsisJa`（Jikan 分类）按 UI 语言择优。
 
@@ -792,6 +815,7 @@ anitrack-backend/src/modules/bee/
 
 - **数据源**：Jikan（`AnimeMeta` / 镜像 `data`）+ Bangumi 映射（`AnimeMirror.titles`、`bangumi.summaryCn`）。
 - **`AnimeMetaService.attachMirrorI18n`**：在 **`findByMalIds`**、**`getOrFetchByMalId`**、**`randomSeasonalFromMirror`**、**`getTimetable`** 响应中合并 `titleCn` / `titleJp` / `titleEn` / `synopsisCn`（优先 DB 已持久化字段，再合并 `AnimeMirror.titles` / `bangumi.summaryCn`）。
+- **当季推荐映射**：`randomSeasonalFromMirror` 抽样后 **同步** `ensureI18nForMalIds`（缺中文时）；`scheduleSeasonalMirrorI18nSync` 全池后台批次；`POST /api/anime-meta/mirror-i18n-sync` 供客户端启动触发。
 - **清单老番映射**：`BeeService.ensureBangumiMappingForMalId` → Bangumi v0 **POST** `/search/subjects`（非 GET）；成功则写入 **`AnimeMeta.titleCn`** 等。运维：`POST /api/bee/map-mal-ids`；日常依赖列表读路径后台批次 + 刷新页面。
 - **搜索 `GET /api/anime-meta/search`**：仍以 Jikan 即时结果为主，**不一定**带 Bangumi 中文名（除非该 `malId` 已有镜像映射）。
 
@@ -812,12 +836,12 @@ anitrack-backend/src/modules/bee/
 - 初版 OpenAPI（最少覆盖 anime 与 heatmap）
 
 ### 阶段 2（逻辑与测试）— **已完成（仓库现状）**
-> 现行后端实现 `/api/stats/heatmap`：以“月份”为单位聚合（人生纸格），输出 `{ start,end,months[] }`；同时保留旧实现/测试的历史记录仅供回顾。
+> 现行后端 `/api/stats/heatmap`：按月聚合（人生纸格），输出 `{ start,end,months[] }`；强度映射见 **§5.2**。
 
 **交付物清单（已对齐）**
-- heatmap 聚合逻辑（纯函数 + Pipeline；**`Date`/`string` 混存修复**）
+- heatmap 聚合 Pipeline + 月度强度纯函数（**`Date`/`string` 混存修复**）
 - `GET /api/stats/heatmap` 路由
-- Vitest：heatmap **integration** + **unit**（强度映射与周结构）
+- Jest：`monthly-heatmap-intensity` 单测；Vitest：heatmap **integration**（Next 代理）
 
 ### 阶段 3（前端渲染）— **课程核心路径：已完成**
 > 原规划中的 **Jikan 代理/缓存（`AnimeMeta`）**、**多页主界面**、**Watchlist / Heatmap / Dashboard 当季推荐 / Timetable** 等均已落地。后续改动以 **体验优化与可选功能**为主（见 **§10.5**），不再作为课程交付阻塞项。
@@ -853,7 +877,7 @@ anitrack-backend/src/modules/bee/
 | **API first** | `swagger.json` + `/api-docs`；契约测试 |
 | API für Frontend + Script-Clients | Next.js `fetcher`；`anitrack-tester` |
 | Integrationstests (API) | Jest e2e/smoke；Vitest integration；contract-validator |
-| Unittests (Business-Logik) | `heatmap-calc`；Jest 单测 |
+| Unittests (Business-Logik) | `monthly-heatmap-intensity`；Jest 单测 |
 | Frontend: wenig Business-Logik | 统计/校验在后端；前端渲染 + 表单 |
 | Responsive Design | §7、`TASK_PROGRESS.md` §4.11 |
 | Präsentation ~7 min/Person, Rollen | 分工写入 PPT 第 2 页（`Project_Intro/演讲大纲.md`）；`.pptx` 待建 |
@@ -878,7 +902,7 @@ anitrack-backend/src/modules/bee/
 
 ---
 
-## 10. 实施进度快照（与仓库同步，**2026-05-28：答辩材料文案 + 图示 + 总纲同步**；**2026-05-21：Swagger / i18n / 响应式**；**2026-05-14：核心交付闭环**）
+## 10. 实施进度快照（与仓库同步，**2026-06-07：Mirror i18n / 当季推荐 / 时间表 & 热力图体验**；**2026-05-28：答辩材料**；**2026-05-21：Swagger / i18n / 响应式**；**2026-05-14：核心交付闭环**）
 
 | 维度 | 状态 |
 |------|------|
@@ -901,13 +925,15 @@ anitrack-backend/src/modules/bee/
 - **`GET /api/stats/heatmap`**：现行输出为 `{ start,end,months[] }`（按 `userId` 聚合：added=`createdAt`；completed/episodes=`completedAt + episodesWatched`），用于“人生纸格（月）”；支持 `start/end=YYYY-MM`。
 - **OpenAPI / Swagger UI（主 API）**：**`http://localhost:3001/swagger.json`** + **`http://localhost:3001/api-docs`**（Nest 加载 `anitrack-backend/swagger.json`），**Try it out** 直连 Nest。前端 **`http://localhost:3000/`** 为页面入口；早期若存在 `public/swagger.json` 仅为历史对照，**勿与 3001 契约混淆**。
 - **Contract Testing**：**AJV**（OpenAPI 3.0 元模式）+ **SwaggerParser** + HTTP 冒烟；严格模式下 **全绿**，与实现 **契约一致**。
-- **Vitest**：`heatmapCalc` 单测 + heatmap **integration test**（真实 Mongo，插入 **COMPLETED** 后断言 **count > 0**）。
+- **Vitest**：heatmap **integration test**（Next 代理 NestJS，断言 `months[]` 结构）。
+- **Jest**：`monthly-heatmap-intensity.spec.ts`（月度强度 0–4 映射）。
 - **数据播种**：`api-test-suite/heatmap-seeder.js` 可稳定追加约 20 条 **COMPLETED**（不清库），用于联调 **intensity 0–4**。
 
 ### 10.2 增量焦点（非课程硬性：体验与数据完备）
 
 - **Jikan / 搜索**：`GET /api/anime-meta/search` 已分页；`AnimeMeta` 已含 `synopsis/genres/totalEpisodes`。
-- **Timetable**：真实数据 + Jikan 星期兜底已上线；**TBD / 缺列**仍受上游与映射率约束（§1.2）。
+- **Timetable**：真实数据 + Jikan 星期兜底已上线；UI 为多列横向滚动 + 前端柏林星期 i18n；**TBD / 缺列**仍受上游与映射率约束（§1.2）。
+- **当季推荐 i18n**：Mirror 抽样优先 `titles.cn`；读路径同步 Bangumi 映射；切换 UI 语言不 reshuffle。
 - **前端**：Dashboard / Library / Profile / Timetable 已对接；**整站 i18n（§7.5）已上线**；Auth、推荐算法、纯 Jikan Schedule 第二视图等见 **§10.5**。
 
 ### 10.3 实现侧备忘（避免重复踩坑）

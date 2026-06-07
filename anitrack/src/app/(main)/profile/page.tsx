@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { StartMonthPicker } from "@/components/StartMonthPicker";
 import { useQuery } from "@tanstack/react-query";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
@@ -30,6 +31,101 @@ function parseYYYYMM(v: string) {
   return { year: y, month: m };
 }
 
+/** Pick year labels with enough column spacing so adjacent years don't overlap. */
+function computeVisibleYearLabels(
+  years: number[],
+  startYear: number,
+  nowYear: number,
+  minColGap = 2,
+): number[] {
+  const lastYear = years[years.length - 1];
+  const candidates: { year: number; priority: number }[] = [];
+
+  for (const y of years) {
+    let priority = 0;
+    if (y === startYear) priority = 4;
+    else if (y === nowYear) priority = 3;
+    else if (y === lastYear && y !== nowYear) priority = 2;
+    else if (y % 5 === 0) priority = 1;
+    else continue;
+    candidates.push({ year: y, priority });
+  }
+
+  candidates.sort((a, b) => b.priority - a.priority || a.year - b.year);
+
+  const placedIdx: number[] = [];
+  const result: number[] = [];
+
+  for (const { year } of candidates) {
+    const idx = years.indexOf(year);
+    if (placedIdx.some((pi) => Math.abs(pi - idx) < minColGap)) continue;
+    placedIdx.push(idx);
+    result.push(year);
+  }
+
+  return result.sort((a, b) => a - b);
+}
+
+const TOOLTIP_W = 220;
+const TOOLTIP_H_EST = 88;
+
+type HeatmapGridMetrics = {
+  colW: number;
+  colGap: number;
+  rowLabelW: number;
+};
+
+const DESKTOP_HEATMAP: HeatmapGridMetrics = { colW: 16, colGap: 3, rowLabelW: 32 };
+
+function isMobileViewport() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 639px)").matches
+  );
+}
+
+function computeHeatmapGridMetrics(
+  yearCount: number,
+  containerWidth = 0,
+): HeatmapGridMetrics {
+  if (!isMobileViewport()) {
+    return DESKTOP_HEATMAP;
+  }
+
+  const colGap = 2;
+  const rowLabelW = 28;
+  if (yearCount <= 0 || containerWidth <= 0) {
+    return { colW: 12, colGap, rowLabelW };
+  }
+  const pad = 24;
+  const available = Math.max(260, containerWidth - pad);
+  const usable = available - rowLabelW;
+  const fitColW = Math.floor((usable - yearCount * colGap) / yearCount);
+  const colW = Math.max(11, Math.min(16, fitColW));
+  return { colW, colGap, rowLabelW };
+}
+
+function computeHeatmapTooltipPos(
+  cellEl: HTMLElement,
+  gridEl: HTMLElement,
+  tooltipH = TOOLTIP_H_EST,
+) {
+  const cellRect = cellEl.getBoundingClientRect();
+  const gridRect = gridEl.getBoundingClientRect();
+  const gap = 6;
+
+  let x = cellRect.left - gridRect.left + cellRect.width / 2 - TOOLTIP_W / 2;
+  x = Math.max(4, Math.min(x, gridRect.width - TOOLTIP_W - 4));
+
+  let y = cellRect.bottom - gridRect.top + gap;
+  if (y + tooltipH > gridRect.height - 4) {
+    y = cellRect.top - gridRect.top - tooltipH - gap;
+  }
+  y = Math.max(4, y);
+
+  return { x, y };
+}
+
 export default function ProfilePage() {
   const { t, locale } = useI18n();
   const { title: displayTitle } = useAnimeDisplay();
@@ -48,6 +144,8 @@ export default function ProfilePage() {
 
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const gridWrapRef = useRef<HTMLDivElement | null>(null);
+  const heatmapScrollRef = useRef<HTMLDivElement | null>(null);
+  const hoverCellRef = useRef<HTMLElement | null>(null);
   const tooltipPosRef = useRef({ x: 0, y: 0 });
   const [tooltip, setTooltip] = useState<{
     open: boolean;
@@ -91,9 +189,56 @@ export default function ProfilePage() {
     },
   });
 
-  const COL_W = 11;
-  const ROW_LABEL_W = 26;
-  const gridWidthPx = ROW_LABEL_W + years.length * (COL_W + 2);
+  const heatmapReady = months.length > 0;
+
+  const [gridMetrics, setGridMetrics] = useState<HeatmapGridMetrics>(DESKTOP_HEATMAP);
+
+  const { colW: COL_W, colGap: COL_GAP, rowLabelW: ROW_LABEL_W } = gridMetrics;
+  const colStep = COL_W + COL_GAP;
+  const gridWidthPx = ROW_LABEL_W + years.length * colStep;
+  const labelFontPx = COL_W >= 16 ? 11 : 10;
+  const yearRowH = COL_W >= 16 ? 18 : 14;
+
+  useLayoutEffect(() => {
+    if (!heatmapReady) return;
+
+    const update = () => {
+      const el = heatmapScrollRef.current;
+      setGridMetrics(computeHeatmapGridMetrics(years.length, el?.clientWidth ?? 0));
+    };
+
+    update();
+    const raf = requestAnimationFrame(update);
+
+    const el = heatmapScrollRef.current;
+    const ro = el ? new ResizeObserver(update) : null;
+    if (el && ro) ro.observe(el);
+    window.addEventListener("resize", update);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [years.length, heatmapReady]);
+
+  const visibleYearLabels = useMemo(
+    () => computeVisibleYearLabels(years, startYear, now.year),
+    [years, startYear, now.year],
+  );
+
+  useLayoutEffect(() => {
+    if (!tooltip?.open || !tooltipRef.current || !gridWrapRef.current || !hoverCellRef.current) {
+      return;
+    }
+    const tipH = tooltipRef.current.offsetHeight;
+    const pos = computeHeatmapTooltipPos(hoverCellRef.current, gridWrapRef.current, tipH);
+    if (Math.abs(pos.x - tooltip.x) > 0.5 || Math.abs(pos.y - tooltip.y) > 0.5) {
+      setTooltip((prev) =>
+        prev && prev.month === tooltip.month ? { ...prev, x: pos.x, y: pos.y } : prev,
+      );
+    }
+  }, [tooltip?.open, tooltip?.month, tooltip?.x, tooltip?.y]);
 
   const loadErr = (err: unknown) =>
     `${t("common.loadFailed")}: ${err instanceof Error ? err.message : t("common.unknownError")}`;
@@ -114,7 +259,7 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-sm font-semibold">{t("profile.heatmap")}</div>
           {heatmap.isLoading ? (
@@ -131,7 +276,7 @@ export default function ProfilePage() {
             {[0, 1, 2, 3, 4].map((i) => (
               <div
                 key={i}
-                className={`size-3 rounded-sm sm:size-3.5 ${intensityClass(i)} ring-1 ring-zinc-200/80 dark:ring-zinc-700`}
+                className={`size-3 rounded-sm sm:size-4 ${intensityClass(i)} ring-1 ring-zinc-200/80 dark:ring-zinc-700`}
               />
             ))}
           </div>
@@ -141,19 +286,12 @@ export default function ProfilePage() {
         <div className="mt-3 grid gap-3">
           <label className="grid gap-1">
             <span className="text-xs text-zinc-500 dark:text-zinc-400">{t("profile.startMonth")}</span>
-            <input
-              type="month"
-              className="h-10 w-full max-w-[220px] rounded-md border border-zinc-200 bg-transparent px-3 text-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:focus:border-zinc-600"
-              value={startMonth}
-              onChange={(e) => setStartMonth(e.target.value)}
-              min="1900-01"
-              max="2100-12"
-            />
+            <StartMonthPicker value={startMonth} onChange={setStartMonth} />
           </label>
 
-          <div className="w-full max-w-full overflow-hidden rounded-xl border border-zinc-200/80 bg-gradient-to-b from-zinc-50/90 to-white dark:border-zinc-800 dark:from-zinc-900/40 dark:to-zinc-950">
+          <div className="w-full max-w-full rounded-xl border border-zinc-200/80 bg-gradient-to-b from-zinc-50/90 to-white dark:border-zinc-800 dark:from-zinc-900/40 dark:to-zinc-950">
             {years.length > 8 ? (
-              <p className="border-b border-zinc-100 px-3 py-1.5 text-[10px] text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
+              <p className="border-b border-zinc-100 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
                 {t("profile.heatmapScrollHint")}
               </p>
             ) : null}
@@ -162,57 +300,45 @@ export default function ProfilePage() {
               <div className="p-4 text-sm text-zinc-500 dark:text-zinc-400">{t("common.noData")}</div>
             ) : (
               <div
-                className="relative max-w-full overflow-x-auto overscroll-x-contain px-2 py-3 [scrollbar-width:thin]"
+                ref={heatmapScrollRef}
+                className="relative max-w-full overflow-x-auto overflow-y-visible overscroll-x-contain px-3 py-2 pb-3 [scrollbar-width:thin]"
                 style={{
                   WebkitOverflowScrolling: "touch",
                 }}
               >
-                <div
-                  className="inline-block min-w-0"
-                  style={{ width: gridWidthPx }}
-                >
+                <div className="mx-auto w-max max-w-full">
+                  <div style={{ width: gridWidthPx }}>
                   <div
-                    className="mb-1.5 grid gap-0.5"
-                    style={{
-                      gridTemplateColumns: `${ROW_LABEL_W}px repeat(${years.length}, ${COL_W}px)`,
-                    }}
+                    className="relative mb-1.5"
+                    style={{ width: gridWidthPx, height: yearRowH }}
                   >
-                    <div className="sticky left-0 z-20 bg-gradient-to-r from-zinc-50 via-zinc-50/95 to-transparent dark:from-zinc-900 dark:via-zinc-900/95" />
-                    {years.map((y, idx) => {
-                      const show =
-                        y === startYear ||
-                        y === now.year ||
-                        y % 5 === 0 ||
-                        idx === years.length - 1;
+                    {visibleYearLabels.map((y) => {
+                      const idx = years.indexOf(y);
+                      const left = ROW_LABEL_W + idx * colStep + COL_W / 2;
                       return (
-                        <div
+                        <span
                           key={y}
-                          className="flex h-4 items-end justify-center text-[9px] tabular-nums text-zinc-500 dark:text-zinc-400"
+                          className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap font-medium tabular-nums text-zinc-500 dark:text-zinc-400"
+                          style={{ left, fontSize: labelFontPx }}
                         >
-                          {show ? (
-                            <>
-                              <span className="font-medium sm:hidden">
-                                {String(y).slice(-2)}
-                              </span>
-                              <span className="hidden font-medium sm:inline">{y}</span>
-                            </>
-                          ) : (
-                            <span className="opacity-30" aria-hidden>
-                              ·
-                            </span>
-                          )}
-                        </div>
+                          <span className="sm:hidden">{String(y).slice(-2)}</span>
+                          <span className="hidden sm:inline">{y}</span>
+                        </span>
                       );
                     })}
                   </div>
 
                   <div
                     ref={gridWrapRef}
-                    className="relative grid gap-0.5"
+                    className="relative grid"
                     style={{
                       gridTemplateColumns: `${ROW_LABEL_W}px repeat(${years.length}, ${COL_W}px)`,
+                      gap: COL_GAP,
                     }}
-                    onMouseLeave={() => setTooltip(null)}
+                    onMouseLeave={() => {
+                      hoverCellRef.current = null;
+                      setTooltip(null);
+                    }}
                   >
                     {Array.from({ length: 12 }).map((_, monthIndex) => {
                       const m = monthIndex + 1;
@@ -221,8 +347,9 @@ export default function ProfilePage() {
                         <div key={m} className="contents">
                           <div
                             className={
-                              "sticky left-0 z-10 flex items-center justify-end bg-gradient-to-r from-zinc-50 via-zinc-50/95 to-transparent pr-1 text-[9px] font-medium text-zinc-500 dark:from-zinc-900 dark:via-zinc-900/95 dark:text-zinc-400"
+                              "sticky left-0 z-10 flex items-center justify-end bg-gradient-to-r from-zinc-50 via-zinc-50/95 to-transparent pr-1 font-medium text-zinc-500 dark:from-zinc-900 dark:via-zinc-900/95 dark:text-zinc-400"
                             }
+                            style={{ fontSize: labelFontPx }}
                           >
                             {showMonthLabel ? monthShort[monthIndex] : ""}
                           </div>
@@ -242,7 +369,8 @@ export default function ProfilePage() {
                               return (
                                 <div
                                   key={key}
-                                  className="size-[11px] rounded-sm opacity-0"
+                                  className="rounded-sm opacity-0"
+                                  style={{ width: COL_W, height: COL_W }}
                                   aria-hidden
                                 />
                               );
@@ -261,28 +389,25 @@ export default function ProfilePage() {
                                 key={key}
                                 type="button"
                                 aria-label={formatMonthYear(key)}
-                                className={`size-[11px] rounded-sm ring-1 ring-zinc-200/60 transition-transform hover:scale-110 hover:ring-emerald-400/60 dark:ring-zinc-700 ${cls} ${
+                                className={`rounded-sm ring-1 ring-zinc-200/60 transition-transform hover:scale-110 hover:ring-emerald-400/60 dark:ring-zinc-700 ${cls} ${
                                   isSelected
                                     ? "ring-2 ring-emerald-500 ring-offset-1 ring-offset-zinc-50 dark:ring-offset-zinc-900"
                                     : ""
                                 }`}
+                                style={{ width: COL_W, height: COL_W }}
                                 onMouseEnter={(e) => {
-                                  const rect = gridWrapRef.current?.getBoundingClientRect();
-                                  if (!rect) return;
-                                  tooltipPosRef.current = {
-                                    x: Math.min(
-                                      rect.width - 200,
-                                      e.clientX - rect.left + 8,
-                                    ),
-                                    y: e.clientY - rect.top + 8,
-                                  };
+                                  const grid = gridWrapRef.current;
+                                  if (!grid) return;
+                                  hoverCellRef.current = e.currentTarget;
+                                  const pos = computeHeatmapTooltipPos(e.currentTarget, grid);
+                                  tooltipPosRef.current = pos;
                                   setTooltip({
                                     open: true,
                                     month: key,
                                     hasActivity: !isAfterNow && hasActivity,
                                     cell,
-                                    x: tooltipPosRef.current.x,
-                                    y: tooltipPosRef.current.y,
+                                    x: pos.x,
+                                    y: pos.y,
                                   });
                                 }}
                                 onClick={() =>
@@ -326,6 +451,7 @@ export default function ProfilePage() {
                       </div>
                     ) : null}
                   </div>
+                </div>
                 </div>
               </div>
             )}

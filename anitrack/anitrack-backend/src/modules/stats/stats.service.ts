@@ -7,6 +7,7 @@ import {
   AnimeEntry,
   AnimeEntryDocument,
 } from '../anime/schemas/anime-entry.schema';
+import { calculateMonthlyIntensity } from '../../common/utils/monthly-heatmap-intensity';
 import { HeatmapQueryDto } from './dto/heatmap-query.dto';
 
 function monthFromDateUTC(d: Date) {
@@ -26,21 +27,6 @@ function addMonthsYYYYMM(ym: string, delta: number) {
   const base = new Date(Date.UTC(yy, (mm ?? 1) - 1, 1, 0, 0, 0, 0));
   base.setUTCMonth(base.getUTCMonth() + delta);
   return monthFromDateUTC(base);
-}
-
-function calculateMonthlyIntensity(args: {
-  addedCount: number;
-  completedCount: number;
-}) {
-  const score = Math.max(
-    0,
-    Math.trunc(args.addedCount) + Math.trunc(args.completedCount),
-  );
-  if (score <= 0) return 0;
-  if (score === 1) return 1;
-  if (score === 2) return 2;
-  if (score <= 4) return 3;
-  return 4;
 }
 
 @Injectable()

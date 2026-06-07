@@ -11,6 +11,7 @@ import {
   createAnimeEntry,
   getAnimeEntries,
 } from "@/lib/api";
+import { DIALOG_BODY_SCROLL, DIALOG_FOOTER, DIALOG_OVERLAY, dialogContentClass } from "@/lib/dialogUi";
 import { useI18n } from "@/i18n/I18nProvider";
 import { useAnimeDisplay } from "@/i18n/useAnimeDisplay";
 import type { createTranslator } from "@/i18n/translate";
@@ -124,14 +125,14 @@ export function TimetableItemDetailDialog({
     >
       {actualOpen ? (
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 w-[min(92vw,560px)] max-h-[min(88vh,720px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
+          <Dialog.Overlay className={DIALOG_OVERLAY} />
+          <Dialog.Content className={dialogContentClass(560)}>
             <Dialog.Title className="sr-only">{primaryTitle}</Dialog.Title>
             <Dialog.Description className="sr-only">{t("timetable.dialog.srDescription")}</Dialog.Description>
 
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-1 gap-3">
-                <div className="h-[88px] w-[88px] shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200 dark:bg-zinc-800 dark:ring-zinc-700">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-zinc-800">
+              <div className="flex min-w-0 flex-1 gap-2.5 sm:gap-3">
+                <div className="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200 sm:h-[88px] sm:w-[88px] dark:bg-zinc-800 dark:ring-zinc-700">
                   {item.imageUrl ? (
                     <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
                   ) : (
@@ -170,7 +171,8 @@ export function TimetableItemDetailDialog({
               </Dialog.Close>
             </div>
 
-            <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500">
+            <div className={DIALOG_BODY_SCROLL}>
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500">
               {t("timetable.dialog.malBgm", {
                 malId: item.malId,
                 bgm: item.bgmId ? ` · Bangumi #${item.bgmId}` : "",
@@ -181,7 +183,7 @@ export function TimetableItemDetailDialog({
               <div className="text-sm font-semibold text-slate-800 dark:text-zinc-200">
                 {t("timetable.dialog.synopsis")}
               </div>
-              <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+              <div className="mt-2 max-h-36 overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 sm:max-h-48 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
                 {synopsisBody ? (
                   synopsisBody
                 ) : (
@@ -189,8 +191,9 @@ export function TimetableItemDetailDialog({
                 )}
               </div>
             </div>
+            </div>
 
-            <div className="mt-5 border-t border-slate-100 pt-4 dark:border-zinc-800">
+            <div className={`${DIALOG_FOOTER} dark:border-zinc-800`}>
               {listQ.isLoading ? (
                 <p className="text-sm text-slate-500 dark:text-zinc-400">{t("timetable.dialog.checkingList")}</p>
               ) : existing ? (

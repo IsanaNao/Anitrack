@@ -16,7 +16,7 @@ describe("GET /api/stats/heatmap (integration)", () => {
       start: "2005-05",
       end: "2005-06",
       months: [
-        { month: "2005-05", addedCount: 1, completedCount: 2, episodeCount: 24, intensity: 3 },
+        { month: "2005-05", addedCount: 1, completedCount: 2, episodeCount: 24, intensity: 2 },
         { month: "2005-06", addedCount: 0, completedCount: 0, episodeCount: 0, intensity: 0 },
       ],
     };

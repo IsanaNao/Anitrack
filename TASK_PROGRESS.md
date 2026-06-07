@@ -17,7 +17,7 @@
   - [ ] Swagger/UI **英文截图**（`screenshots/`，插入 PPT 第 7/12 页）、第 2 页真实姓名、计时排练
 - **下一步**：按 **`Project_Intro/答辩清单.md`** 完成 PPT/截图并排练（≈7 分钟/人）；演示时 App 切 **English**
 - **阻塞/风险**：无课程级阻塞；**`TEMP_USER_ID`** 在接入 Auth 前仍为技术债（见 §9）；时间表部分 **TBD** 为数据限制，不阻塞课程
-- **最后更新时间**：2026-05-28（三份总纲文档 + `Project_Intro` 中文文件名同步）
+- **最后更新时间**：2026-06-07（Mirror 当季 i18n、当季推荐语言解耦、时间表/热力图/Dialog 体验）
 
 ---
 
@@ -68,14 +68,13 @@
 ## 3. 阶段 2：逻辑与测试（已完成）
 
 ### 3.1 Heatmap 后端逻辑
-- [x] 数据提取：筛选 `status=COMPLETED`，读取 `completedDates`
-- [x] 计数聚合：按天 count（MongoDB **Aggregation Pipeline**：`$match` → `$unwind` → **`$addFields` 日期 Normalization**（`$dateToString` / `$trim`）→ 闭区间 `$match` → `$group`）
-- [x] **混合类型修复**：历史或驱动层导致的 **BSON `Date` / `string` 混存** 不再使 `$gte`/`$lte` 静默失败（曾表现为 **count 全 0**）
-- [x] （历史/遗留）按天绿墙：曾输出 `weeks -> days`（`from/to`），作为阶段 2 的聚合与类型兼容性验证
-- [x] （现行）`GET /api/stats/heatmap`：升级为“人生纸格（月）”，支持 `start/end=YYYY-MM`，返回 `months[]`（added/completed/episodes + intensity）
+- [x] 数据提取：`addedCount`（`createdAt` 月）、`completedCount` / `episodeCount`（`completedAt` 月 + `status=COMPLETED`）
+- [x] **混合类型修复**：历史 BSON `Date` / `string` 混存不再使聚合静默失败
+- [x] （现行）`GET /api/stats/heatmap`：人生纸格（月），`start/end=YYYY-MM`，返回 `months[]`（added/completed/episodes + intensity）
+- [x] 移除按日绿墙遗留：`heatmapCalc.ts` / `heatmap-calc.ts`（weeks→days）已删除
 
 ### 3.2 单元测试（Unit）
-- [x] 强度映射与周结构：`src/lib/__tests__/heatmap-calc.test.ts`（Vitest）
+- [x] 月度强度映射：`anitrack-backend/src/common/utils/monthly-heatmap-intensity.spec.ts`（Jest）
 
 ### 3.3 集成测试（Integration，Vitest）
 - [x] `npm run test:integration`：`src/__tests__/integration/heatmap.integration.test.ts`（断言 Next.js `app/api/stats/heatmap` 已变为 **NestJS 代理**：转发 `start/end/tz` 并返回 `{ start,end,months[] }`）
@@ -113,6 +112,10 @@
 - [x] 点击锁定：选中格子高亮（`ring-2 ring-blue-500`），下方展示 “Activity for YYYY-MM”（Added/Completed 时间轴列表）
 - [x] Activity 后端化：新增 `GET /api/stats/activity?month=YYYY-MM`，前端不再全量拉取再过滤（Profile 页点击月份 → 拉取该月 Added/Completed 列表）
 - [x] Legend：为 intensity 0-4 增加颜色图例
+- [x] 热力图：年×月坐标 + tooltip 防裁切 + 年份标签防重叠（2026-06-07）
+- [x] 起始月 **`StartMonthPicker`**（i18n 年/月下拉，替代原生 `type="month"`）
+- [x] 桌面端格子 **16×16px**、图例对齐；`ResizeObserver` 在 `months.length > 0` 后再测量
+- [x] 月度强度阈值收紧：**1→1，2–4→2，5–8→3，≥9→4**（`monthly-heatmap-intensity.ts`，删除按日遗留）
 
 ### 4.4 Seasonal Schedule（Jikan）
 - [ ] 后端可选 `GET /api/anime-meta/schedule`：若需要「纯 Jikan 放送表」视图，可作为与现行 Bangumi 驱动 Timetable **并存**的第二条读路径（需缓存与 429 策略）
@@ -128,13 +131,14 @@
 - [x] 激活 Profile & Stats：新增 `GET /api/stats/summary`，Dashboard 顶部展示总量/完成/评分等指标
 - [x] Watching Now：横向滚动流 + onWheel 劫持（区块内垂直滚轮映射为水平滚动），卡片统一 `aspect-[2/3]`、封面 `h-48 object-cover`、进度条
 - [x] Watching Now 卡片可点击：复用 `AnimeEntryDialog` 编辑进度/状态/评分
-- [x] Dashboard「新番随机推荐」：`GET /api/anime-meta/seasonal-random` 从 `AnimeMirror`（`tier=seasonal`）`$sample` 抽样，**读路径不调用 Jikan**；前端换一批 + 加入清单（Sonner 成功/重复/错误提示）
+- [x] Dashboard「当季推荐」：`GET /api/anime-meta/seasonal-random` — `$sample` + **优先 `titles.cn`**；读路径 **同步** Bangumi 映射；**`queryKey` 不含 `locale`**（切语言不 reshuffle，仅「换一批」重新抽样）
+- [x] **`MirrorI18nBootstrap`** + `POST /api/anime-meta/mirror-i18n-sync` — 启动时后台补全 seasonal 池映射
 - [ ] 推荐增强（可选）：每日个性化 / Library 标签加权等
 
 ### 4.7 Timetable（新番时间表）
 - [x] 后端：`GET /api/anime-meta/timetable?days=` — 当季 `AnimeMirror`；**星期**优先 `bangumi.weekday`，否则 **Jikan `broadcast.day` / `string`**；柏林日历列 + 东京墙钟 → `Europe/Berlin`；未映射 Bangumi 时 **`bgmId` 可为 `0`**
 - [x] 后端：`normalizeBangumiWallClock` + `airDate` / `broadcast` 兜底；**仍有不少条目无 `airTimeLocal`（前端 TBD）** — **数据侧暂缓**，非 UI 截断
-- [x] 前端：`/timetable` 真实数据、横向日期列、7/14 天、列 **`items-start`** 全量列表；**`TimetableItemDetailDialog`**；追更 `POST /api/anime`；已移除「番剧索引」占位
+- [x] 前端：`/timetable` — **多列横向滚动**（200px 列宽、左右箭头、今天列高亮）；`formatWeekdayBerlin` 按 UI locale 显示星期；**`TimetableItemDetailDialog`**（`z-50`）；追更 `POST /api/anime`；已移除「番剧索引」占位与 7/14 天切换
 - [ ] **后续（可选）**：更强 enrich、第三方放送表、或接受部分 **TBD / 缺列**（见 Blueprint §10.5）
 
 ### 4.8 Bee（Anime Mirror System，后台镜像同步）
@@ -163,6 +167,7 @@
 2. **数据从哪来**：Jikan 提供 `title` / `synopsis` 等；Bee 映射 Bangumi 后，镜像上带有 `titles.cn` 与 `bangumi.summaryCn`，后端读时 **`attachMirrorI18n`** 合并进响应（清单、当季推荐、时间表）。
 3. **清单老番按需映射（2026-05-21 增补）**：当季以外条目原先只有 Jikan 英文/罗马字标题。读清单时 **`findByMalIds`** **后台**触发缺 `titleCn` 的 `malId`（每批最多 8 个，不阻塞「加载中」）→ **`BeeService.ensureBangumiMappingForMalId`**（Bangumi v0 **POST** `search/subjects` + subject），写入 `AnimeMirror.titles` 并持久化 **`AnimeMeta.titleCn`**。终端日志 **`[i18n-map]`**。手动批量：`POST /api/bee/map-mal-ids?malIds=8861,38000`（已写入 **`swagger.json`**）。
 4. **为何不绑路由**：用 `I18nProvider` + `localStorage`，避免改动 App Router；与课程「API-First、前端只渲染」一致。
+5. **当季推荐（2026-06-07）**：API 返回多语言快照；React Query **不把 `locale` 放进 `queryKey`**；后端抽样后同步 mapping，无需前端词典。
 
 - [x] **文案抽离**：`src/i18n/messages/{zh,en}.ts` + `I18nProvider` / `useI18n()`；覆盖导航、各页区块、Dialog、Sonner、分页与状态筛选等
 - [x] **语言切换 UX**：`TopNav` 内 **`LanguageSwitcher`**（中 / EN）；偏好 **`localStorage`**（`anitrack.locale`），并同步 `document.documentElement.lang`
@@ -174,15 +179,16 @@
 **原理（简要）**
 
 1. **移动优先 + 断点增强**：Tailwind `sm` / `md`；`viewport` + 安全区；窄屏不依赖横向撑满视口。
-2. **时间表**：统一为顶部可滑日期条（`pastDays=14` & `futureDays=14`），单日列表；桌面与手机同一交互。
+2. **时间表**：**多列横向滚动**（`pastDays=14` & `futureDays=14`，±2 周）；每列一天；桌面与手机同一布局。
 3. **卡片**：`AnimeCard` 的 `density="compact"` 保证仪表盘双列/横滑时**标题 + 进度**可见。
 4. **热力图**：固定列宽网格 + `overflow-x-auto` + 月份列 `sticky`，避免溢出卡片。
 
 - [x] **`viewport`** + 安全区内边距（`AppShell` / `TopNav`）
 - [x] **移动端导航**：`TopNav` 汉堡菜单（`md+` 横排链接）
 - [x] **Dashboard / Library**：区块头与工具栏小屏纵向堆叠；`AnimeCard` compact；分页换行
-- [x] **时间表**：横向日期条 ±2 周；移除 7/14 天切换；「现在」时间线
-- [x] **档案热力图**：固定列宽 + 横向滚动 + sticky 月份列
+- [x] **时间表**：多列横向滚动 ±2 周；`formatWeekdayBerlin`；移除 7/14 天切换与「选中日单列」；「现在」时间线
+- [x] **档案热力图**：固定列宽 + 横向滚动 + sticky 月份列；桌面 **16px** 格子；`StartMonthPicker`
+- [x] **Dialog 共用样式**：`lib/dialogUi.ts` — 移动端近全屏可滚动、`z-50`；`AnimeEntryDialog` 删除二次确认
 - [x] **构建验收**：`anitrack` 与 `anitrack-backend` 的 `npm run build` 通过（2026-05-21）
 
 **可选后续**：真机抽查（iOS Safari / Android Chrome）与 Dialog 触控间距微调。
@@ -207,7 +213,17 @@
 
 > 写清楚“为什么这么做”，避免后续来回推翻。
 
-- 2026-04-20：Heatmap 强度阈值（Draft）：0→0，1→1，2→2，3-4→3，5+→4（可调整）
+- 2026-04-20：Heatmap 强度阈值（初版）：0→0，1→1，2→2，3–4→3，5+→4
+- **2026-06-07（热力图 / 时间表体验 + 强度收紧）**：
+  - 前端：`/timetable` 改为 animeko 风格多列横向滚动（固定列宽、左右导航）；`formatWeekdayBerlin` 星期 i18n；Dialog `z-50`
+  - 前端：Profile 热力图年份标签防重叠；底部格子 tooltip 智能上翻；`StartMonthPicker`；桌面 16px 格子
+  - 前端：当季推荐 **`queryKey` 去 `locale`** — 切换语言不 reshuffle；`MirrorI18nBootstrap`
+  - 后端：`randomSeasonalFromMirror` 优先 `titles.cn` 抽样 + 同步 Bangumi 映射；`POST mirror-i18n-sync`
+  - 后端：删除按日热力图遗留；月度强度阈值收紧为 **1→1，2–4→2，5–8→3，≥9→4**（`monthly-heatmap-intensity.ts`）
+  - 文档：`PROJECT_BLUEPRINT.md` §3.8.5 / §7.2–§7.5、`TASK_PROGRESS.md`、`README.md` 同步
+- **2026-06-07（Mirror i18n / 当季推荐语言解耦）**：
+  - **问题**：Mirror 当季数据缺 `titles.cn` 时中文 UI 显示英文；且 `queryKey` 含 `locale` 导致切语言 reshuffle
+  - **决策**：展示语言与抽样解耦 — API 一次返回全量 i18n 字段；前端 `pickAnimeTitle`；仅「换一批」重新 `$sample`
 - 2026-04-20：日期格式统一为 `YYYY-MM-DD`（便于统计与时区处理）
 - 2026-05-21：**i18n 双层解耦** — UI 词典与作品字段优先级分离；不引入 `next-intl` 路由 locale；Bangumi 中文依赖镜像映射率（搜索路径仍可能仅英文标题）
 - 2026-05-21：**Swagger 含 Bee POST** — 契约冒烟改为按 OpenAPI 方法探测，避免 POST 路由被误 GET
@@ -296,6 +312,11 @@
 - **2026-05-28（总纲文档同步）**：
   - `README.md` / `PROJECT_BLUEPRINT.md` / `TASK_PROGRESS.md` 对齐中文答辩文件名与**项目状态**确认
 
+- **2026-06-07（体验增量 + Mirror i18n）**：
+  - 后端：`seasonal-random` 读路径同步 Bangumi；`mirror-i18n-sync`；`sampleSeasonalMirrorRows` 优先中文标题
+  - 前端：Dashboard 当季推荐 queryKey 去 locale；`MirrorI18nBootstrap`；时间表多列 UI；Profile 热力图/起始月/Dialog 体验
+  - 文档：三份总纲同步（本节 + Blueprint §3.8.5 / §7）
+
 - **2026-05-14（文档：核心闭环 vs 锦上添花）**：
   - `PROJECT_BLUEPRINT.md`：§1.2 / §3.8.6 / §3.9.11 / §7.2 Timetable 与实现对齐；§8 阶段 3 标为已完成；**新增 §10.5**（未开发 / 建议开发 / 建议放弃）
   - `README.md`：里程碑说明、路线图阶段 5+ 改为可选、**后续增量**小表、修正 Bee Runbook 代码块 `PowerShell`、Timetable 描述（Jikan 星期兜底、`bgmId=0`）
@@ -335,7 +356,7 @@
 
 目录：`anitrack/`
 
-- `npm test`：Vitest 单测（heatmapCalc 等）
+- `npm test`：Vitest（heatmap 代理 integration 等；强度单测在后端 Jest）
 - `npm run test:integration`：Vitest 集成（需要 `MONGODB_URI`，由 `vitest.integration.config.ts` 读取 `anitrack/.env.local`）
 
 ### 10.3 契约/HTTP 冒烟工具
@@ -381,7 +402,7 @@
 ### 12.1 图示一致性要点（避免讲错）
 
 - API **主供应方是 NestJS `3001`**
-- 时间表：**±2 周**日期条 + 选中日列表（无 7/14 切换）
+- 时间表：**±2 周**多列横向滚动（无 7/14 切换、无「选中日单列」）
 - App **可双语**，答辩 Live-Demo 请切 **English**
 - Swagger：**不必另写文档** — 展示 `http://localhost:3001/api-docs` + `swagger.json`
 

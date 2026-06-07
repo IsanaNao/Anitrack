@@ -56,6 +56,7 @@ type JikanSearchResponse = {
 @Injectable()
 export class AnimeMetaService {
   private readonly log = new Logger(AnimeMetaService.name);
+  private seasonalMirrorI18nTask: Promise<void> | null = null;
 
   constructor(
     @InjectModel(AnimeMeta.name)
@@ -305,6 +306,80 @@ export class AnimeMetaService {
     return { attempted, mapped, persisted };
   }
 
+  /** 将 Mirror 已有 titles.cn 同步到缺 titleCn 的 AnimeMeta（无需 Bangumi 搜索）。 */
+  private async syncMetaFromExistingMirrorTitles(malIds: number[]): Promise<number> {
+    if (!malIds.length) return 0;
+    const metaMissing = await this.model
+      .find({
+        malId: { $in: malIds },
+        $or: [{ titleCn: { $exists: false } }, { titleCn: null }, { titleCn: '' }],
+      })
+      .select('malId')
+      .lean();
+    const need = new Set(metaMissing.map((d) => d.malId));
+    if (!need.size) return 0;
+
+    const mirrors = await this.mirrorModel
+      .find({ malId: { $in: [...need] } })
+      .select('malId titles.cn')
+      .lean();
+    let synced = 0;
+    for (const m of mirrors) {
+      if (typeof m.titles?.cn !== 'string' || !m.titles.cn.trim()) continue;
+      await this.persistI18nFromMirror(m.malId);
+      synced += 1;
+    }
+    if (synced > 0) {
+      this.log.log(`[i18n-map] Mirror 当季池：${synced} 部已从 Mirror 同步 titleCn 至 AnimeMeta`);
+    }
+    return synced;
+  }
+
+  private async runI18nBatches(malIds: number[]): Promise<void> {
+    const BATCH = 8;
+    for (let i = 0; i < malIds.length; i += BATCH) {
+      const batch = malIds.slice(i, i + BATCH);
+      try {
+        await this.ensureI18nForMalIds(batch);
+      } catch (e: unknown) {
+        this.log.warn(`[i18n-map] Mirror 当季批次异常: ${describeApiError(e)}`);
+      }
+      if (i + BATCH < malIds.length) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+  }
+
+  /**
+   * 为 AnimeMirror 当季池后台补 Bangumi 映射（客户端启动 / 读路径触发，幂等）。
+   */
+  async scheduleSeasonalMirrorI18nSync(): Promise<{ queued: number; running: boolean }> {
+    const rows = await this.mirrorModel
+      .find({ tier: 'seasonal', malId: { $gt: 0 } })
+      .select('malId')
+      .lean();
+    const malIds = [...new Set(rows.map((r) => r.malId))];
+    if (!malIds.length) return { queued: 0, running: false };
+
+    await this.syncMetaFromExistingMirrorTitles(malIds);
+
+    const need = await this.malIdsNeedingI18n(malIds);
+    if (!need.length) {
+      return { queued: 0, running: Boolean(this.seasonalMirrorI18nTask) };
+    }
+
+    if (!this.seasonalMirrorI18nTask) {
+      this.log.log(
+        `[i18n-map] Mirror 当季池：${need.length} 部待 Bangumi 映射，后台批次处理`,
+      );
+      this.seasonalMirrorI18nTask = this.runI18nBatches(need).finally(() => {
+        this.seasonalMirrorI18nTask = null;
+      });
+    }
+
+    return { queued: need.length, running: true };
+  }
+
   async findByMalIds(malIds: number[]) {
     if (!malIds.length) return [];
     const need = await this.malIdsNeedingI18n(malIds);
@@ -547,50 +622,133 @@ export class AnimeMetaService {
   }
 
   /**
+   * 当季 Mirror 抽样：优先已有 Bangumi 中文名的条目，减少 UI 语言与标题不一致。
+   */
+  private async sampleSeasonalMirrorRows(limit: number) {
+    const n = Math.min(12, Math.max(1, Math.floor(limit) || 1));
+    const baseMatch = {
+      tier: 'seasonal' as const,
+      malId: { $gt: 0 },
+      data: { $exists: true, $ne: null },
+    };
+    const withCn = await this.mirrorModel.aggregate([
+      {
+        $match: {
+          ...baseMatch,
+          'titles.cn': { $exists: true, $nin: [null, ''] },
+        },
+      },
+      { $sample: { size: n } },
+    ]);
+    if (withCn.length >= n) return withCn.slice(0, n);
+    const exclude = withCn.map((r) => r.malId as number);
+    const rest = await this.mirrorModel.aggregate([
+      {
+        $match: {
+          ...baseMatch,
+          malId: { $gt: 0, $nin: exclude },
+        },
+      },
+      { $sample: { size: n - withCn.length } },
+    ]);
+    return [...withCn, ...rest];
+  }
+
+  private mapSeasonalMirrorRowToItem(row: {
+    malId: number;
+    titles?: { cn?: string; jp?: string; en?: string };
+    bangumi?: { summaryCn?: string };
+    data?: unknown;
+  }) {
+    const inner = (row as { data?: { data?: Record<string, unknown> } })?.data
+      ?.data as Record<string, unknown> | undefined;
+    if (!inner || typeof inner !== 'object') return null;
+    const malId = Number(row.malId);
+    const title = String(inner.title ?? '').trim();
+    if (!Number.isFinite(malId) || malId <= 0 || !title) return null;
+    const images = inner.images as
+      | { jpg?: { image_url?: string | null } }
+      | undefined;
+    const totalEpisodes = inner.episodes as number | null | undefined;
+    const genres = this.normalizeGenres(
+      inner.genres as Array<{ name?: string | null }> | null | undefined,
+    );
+    const synopsis =
+      typeof inner.synopsis === 'string' ? inner.synopsis : undefined;
+
+    return this.attachMirrorI18n(
+      {
+        malId,
+        title,
+        imageUrl: images?.jpg?.image_url ?? undefined,
+        episodes: totalEpisodes ?? undefined,
+        totalEpisodes: totalEpisodes ?? undefined,
+        score: (inner.score as number | null | undefined) ?? undefined,
+        synopsis,
+        genres,
+      },
+      row,
+    );
+  }
+
+  /**
    * Dashboard / discovery: random **seasonal** titles from `AnimeMirror` (Bee), no Jikan calls.
+   * 抽样后同步 Bangumi 映射，响应含 titleCn/titleEn 等；前端按 UI 语言 pick，切换语言不重新抽样。
    */
   async randomSeasonalFromMirror(limit: number) {
-    const raw = await this.bee.sampleSeasonalMirrorDocs(limit);
-    const items = raw
-      .map((row) => {
-        const inner = (row as { data?: { data?: Record<string, unknown> } })?.data
-          ?.data as Record<string, unknown> | undefined;
-        if (!inner || typeof inner !== 'object') return null;
-        const malId = Number(row.malId);
-        const title = String(inner.title ?? '').trim();
-        if (!Number.isFinite(malId) || malId <= 0 || !title) return null;
-        const images = inner.images as
-          | { jpg?: { image_url?: string | null } }
-          | undefined;
-        const totalEpisodes = inner.episodes as number | null | undefined;
-        const genres = this.normalizeGenres(
-          inner.genres as Array<{ name?: string | null }> | null | undefined,
+    void this.scheduleSeasonalMirrorI18nSync().catch((e: unknown) => {
+      this.log.warn(
+        `[i18n-map] seasonal-random 触发映射失败: ${describeApiError(e)}`,
+      );
+    });
+
+    let rows = await this.sampleSeasonalMirrorRows(limit);
+    const malIds = rows
+      .map((r) => Number(r.malId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (malIds.length) {
+      await this.syncMetaFromExistingMirrorTitles(malIds);
+      const need = await this.malIdsNeedingI18n(malIds);
+      if (need.length) {
+        this.log.log(
+          `[i18n-map] seasonal-random：同步映射 ${need.length} 部 → [${need.join(', ')}]`,
         );
-        const i18nTitles = this.extractTitlesFromMirrorRow(row as {
-          titles?: { cn?: string; jp?: string; en?: string };
-          data?: unknown;
-        });
-        const summaryRaw = (row as { bangumi?: { summaryCn?: string } }).bangumi
-          ?.summaryCn;
-        const synopsisCn =
-          typeof summaryRaw === 'string' && summaryRaw.trim()
-            ? stripHtmlSummary(summaryRaw)
-            : undefined;
-        return {
-          malId,
-          title,
-          ...i18nTitles,
-          imageUrl: images?.jpg?.image_url ?? undefined,
-          episodes: totalEpisodes ?? undefined,
-          totalEpisodes: totalEpisodes ?? undefined,
-          score: (inner.score as number | null | undefined) ?? undefined,
-          synopsis:
-            typeof inner.synopsis === 'string' ? inner.synopsis : undefined,
-          synopsisCn,
-          genres,
-        };
+        await this.ensureI18nForMalIds(need);
+        rows = await this.mirrorModel
+          .find({ malId: { $in: malIds } })
+          .lean();
+        const order = new Map(malIds.map((id, i) => [id, i]));
+        rows.sort(
+          (a, b) => (order.get(a.malId) ?? 0) - (order.get(b.malId) ?? 0),
+        );
+      }
+    }
+
+    const metaDocs = await this.model
+      .find({ malId: { $in: malIds } })
+      .lean();
+    const metaByMal = new Map(metaDocs.map((d) => [d.malId, d]));
+
+    const items = rows
+      .map((row) => {
+        const base = this.mapSeasonalMirrorRowToItem(row);
+        if (!base) return null;
+        const meta = metaByMal.get(Number(row.malId));
+        if (!meta) return base;
+        return this.attachMirrorI18n(
+          {
+            ...(base as Record<string, unknown>),
+            titleCn: meta.titleCn,
+            titleJp: meta.titleJp,
+            titleEn: meta.titleEn,
+            synopsisCn: meta.synopsisCn,
+          },
+          row,
+        );
       })
       .filter((v): v is NonNullable<typeof v> => Boolean(v));
+
     return { items };
   }
 

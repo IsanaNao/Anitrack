@@ -215,6 +215,18 @@ export async function getSeasonalRandomPicks(params?: {
   );
 }
 
+export type MirrorI18nSyncResponse = {
+  queued: number;
+  running: boolean;
+};
+
+/** 客户端启动：为 Mirror 当季池后台触发 Bangumi i18n 映射。 */
+export async function syncMirrorSeasonalI18n(): Promise<MirrorI18nSyncResponse> {
+  return fetcher<MirrorI18nSyncResponse>(`/anime-meta/mirror-i18n-sync`, {
+    method: "POST",
+  });
+}
+
 export async function getTimetable(params?: {
   /** @deprecated 仅向未来；请用 pastDays + futureDays */
   days?: number;
